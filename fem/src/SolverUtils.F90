@@ -3844,7 +3844,7 @@ CONTAINS
     LOGICAL, POINTER :: LimitActive(:)
     TYPE(Variable_t), POINTER :: Var
 
-    INTEGER :: ind, ElemFirst, ElemLast, bf
+    INTEGER :: ind, ElemFirst, ElemLast, bf, BCstr, BCend, BCinc
     REAL(KIND=dp) :: SingleVal
     LOGICAL :: AnySingleBC, AnySingleBF
     LOGICAL, ALLOCATABLE :: LumpedNodeSet(:)
@@ -3970,7 +3970,7 @@ CONTAINS
     ! --------------------------------------------------------------
     IF ( NormalTangentialNOFNodes>0 ) THEN
       IF ( OrderByBCNumbering ) THEN
-        DO i=1,Model % NumberOfBCs
+        DO i=BCstr,BCend,BCinc
           BC = i
           IF(ReorderBCs) BC = BCOrder(BC)
           IF(.NOT. ActivePart(BC) .AND. .NOT. ActivePartAll(BC) ) CYCLE
@@ -3995,7 +3995,7 @@ CONTAINS
         END DO
       ELSE
         DO t = bndry_start, bndry_end
-          DO BC=1,Model % NumberOfBCs
+          DO BC=Bcstr,BCend,BCinc
             IF(.NOT. ActivePart(BC) .AND. .NOT. ActivePartAll(BC) ) CYCLE
             Conditional = ActiveCond(BC)
           
@@ -4035,7 +4035,15 @@ CONTAINS
     !----------------------------------------------------------------
     IF( ANY(ActivePart) .OR. ANY(ActivePartAll) ) THEN    
       IF ( OrderByBCNumbering ) THEN
-        DO i=1,Model % NumberOfBCs
+        BCstr = 1
+        BCinc = 1
+        BCend = Model % NumberOfBCs
+        IF(A % Symmetric) THEN
+          BCstr = Model % NumberOfBCs
+          BCend =  1
+          BCinc = -1
+        END IF
+        DO i=BCstr,BCend,BCinc
           BC = i
           IF(ReorderBCs) BC = BCOrder(BC)
           IF(.NOT. ActivePart(BC) .AND. .NOT. ActivePartAll(BC) ) CYCLE
@@ -4915,6 +4923,7 @@ CONTAINS
           IF( .NOT. LimitActive(nDofs*(k-1)+dof)) CYCLE
 
           k = OffSet + NDOFs * (k-1) + DOF
+
           IF ( A % FORMAT == MATRIX_SBAND ) THEN
             CALL SBand_SetDirichlet( A,b,k,Work(j) )
           ELSE IF ( A % FORMAT == MATRIX_CRS .AND. A % Symmetric ) THEN
@@ -4924,9 +4933,9 @@ CONTAINS
             IF( .NOT. OffDiagonal ) THEN
               IF(.NOT.A % NoDirichlet ) CALL SetMatrixElement( A,k,k,1.0d0 )
               b(k) = Work(j)/DiagScaling(k)
-              IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(k) = .TRUE.
             END IF
           END IF
+          IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(k) = .TRUE.
         END DO
       END IF
 
