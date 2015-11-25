@@ -43,7 +43,7 @@ Solver 1
   Variable =  P[P re:1 P im:1]
 
   Steady State Convergence Tolerance = 1.0e-5
-  Nonlinear System Convergence Tolerance = 1.0e-8
+  Nonlinear System Convergence Tolerance = 1.0e-5
   Nonlinear System Max Iterations = 20
   Nonlinear System Newton After Iterations = 3
   Nonlinear System Newton After Tolerance = 1.0e-3
