@@ -2808,6 +2808,10 @@ CONTAINS
 !------------------------------------------------------------------------------
  SUBROUTINE UpdatePermonMatrix(A,G,n,dofs,nind)
 !------------------------------------------------------------------------------
+#ifdef HAVE_PERMON
+   use permon
+#endif
+
    TYPE(Matrix_t) :: A
    INTEGER :: n, dofs, nInd(:)
    REAL(KIND=dp) :: G(:,:)
@@ -2818,22 +2822,21 @@ CONTAINS
   INTEGER(C_INT), ALLOCATABLE :: ind(:)
 
 #ifdef HAVE_PERMON
-  INTERFACE
-     FUNCTION Permon_InitMatrix(n) RESULT(handle) BIND(C,Name="permon_init")
-       USE, INTRINSIC :: ISO_C_BINDING
-       TYPE(C_PTR) :: Handle
-       INTEGER(C_INT), VALUE :: n
-     END FUNCTION Permon_InitMatrix
-
-     SUBROUTINE Permon_UpdateMatrix(handle,n,inds,vals) BIND(C,Name="permon_update")
-       USE, INTRINSIC :: ISO_C_BINDING
-       TYPE(C_PTR), VALUE :: Handle
-       INTEGER(C_INT), VALUE :: n
-       INTEGER(C_INT) :: inds(*)
-       REAL(C_DOUBLE) :: vals(*)
-     END SUBROUTINE Permon_UpdateMatrix
-  END INTERFACE
-
+!!$  INTERFACE
+!!$     FUNCTION Permon_InitMatrix(n) RESULT(handle) BIND(C,Name="permon_init")
+!!$       USE, INTRINSIC :: ISO_C_BINDING
+!!$       TYPE(C_PTR) :: Handle
+!!$       INTEGER(C_INT), VALUE :: n
+!!$     END FUNCTION Permon_InitMatrix
+!!$
+!!$     SUBROUTINE Permon_UpdateMatrix(handle,n,inds,vals) BIND(C,Name="permon_update")
+!!$       USE, INTRINSIC :: ISO_C_BINDING
+!!$       TYPE(C_PTR), VALUE :: Handle
+!!$       INTEGER(C_INT), VALUE :: n
+!!$       INTEGER(C_INT) :: inds(*)
+!!$       REAL(C_DOUBLE) :: vals(*)
+!!$     END SUBROUTINE Permon_UpdateMatrix
+!!$  END INTERFACE
 
   IF(.NOT.C_ASSOCIATED(A % PermonMatrix)) THEN
     A % NoDirichlet = .TRUE.

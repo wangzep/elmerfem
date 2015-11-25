@@ -37,6 +37,7 @@ SET(WITH_ELMERGUITESTER FALSE CACHE BOOL "Include ElmerGUI tester")
 SET(WITH_ELMERGUILOGGER FALSE CACHE BOOL "Include ElmerGUI logger")
 SET(ELMER_INSTALL_LIB_DIR "lib/elmersolver" CACHE PATH "Location of elmer shared libraries relative to prefix.")
 SET(WITH_Trilinos FALSE CACHE BOOL "Use Trilinos")
+SET(WITH_Permon FALSE CACHE BOOL "Use Permon")
 SET(WITH_ELMERPOST FALSE CACHE BOOL "Include ElmerPost (DEPRECATED)")
 
 MARK_AS_ADVANCED(WITH_ELMERPOST)
@@ -159,6 +160,10 @@ IF(MPI_FOUND)
   IF(WITH_Hypre)
     FIND_PACKAGE(Hypre REQUIRED OPTIONAL_COMPONENTS Euclid parcsr_ls ParaSails IJ_mv QUIET)
   ENDIF()
+  # Permon
+  IF(WITH_Permon)
+    FIND_PACKAGE(Permon REQUIRED)
+  ENDIF()
 ENDIF()
 
 IF(Mumps_FOUND)
@@ -172,6 +177,12 @@ IF(Hypre_FOUND)
   MARK_AS_ADVANCED(HAVE_HYPRE)
   INCLUDE_DIRECTORIES(${Hypre_INCLUDE_DIR})
   # LINK_DIRECTORIES(${Hypre_LIBRARIES})
+ENDIF()
+
+IF(Permon_FOUND)
+  SET(HAVE_PERMON TRUE)
+  MARK_AS_ADVANCED(HAVE_PERMON)
+  ADD_DEFINITIONS(-DHAVE_PERMON)
 ENDIF()
 
 # Check if Fortran compiler supports procedure pointer
