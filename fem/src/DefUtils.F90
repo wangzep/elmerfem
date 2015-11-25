@@ -2808,8 +2808,8 @@ CONTAINS
 !------------------------------------------------------------------------------
  SUBROUTINE UpdatePermonMatrix(A,G,n,dofs,nind)
 !------------------------------------------------------------------------------
-#ifdef HAVE_PERMON
-   use permon
+#ifdef HAVE_FETI4I
+   use feti4i
 #endif
 
    TYPE(Matrix_t) :: A
@@ -2821,7 +2821,7 @@ CONTAINS
   INTEGER :: i,j,k,l,k1,k2
   INTEGER(C_INT), ALLOCATABLE :: ind(:)
 
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
 !!$  INTERFACE
 !!$     FUNCTION Permon_InitMatrix(n) RESULT(handle) BIND(C,Name="permon_init")
 !!$       USE, INTRINSIC :: ISO_C_BINDING
@@ -3890,7 +3890,7 @@ CONTAINS
        ScaleSystem=GetLogical(Params,'Linear System Scaling',Found)
        IF(.NOT.Found) ScaleSystem=.TRUE.
      END IF
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
      IF(C_ASSOCIATED(A % PermonMatrix)) ScaleSystem = .FALSE.
 #endif
 

@@ -218,8 +218,8 @@ END INTERFACE
              CALL Info('MAIN', ' Running in parallel with ' // &
                        TRIM(i2s(nthreads)) // ' threads per task.')
 
-#ifdef HAVE_PERMON
-         CALL Info( 'MAIN', ' PERMON library linked in.')
+#ifdef HAVE_FETI4I
+         CALL Info( 'MAIN', ' FETI4I library linked in.')
 #endif
 #ifdef HAVE_HYPRE
          CALL Info( 'MAIN', ' HYPRE library linked in.')

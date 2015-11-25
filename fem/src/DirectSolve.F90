@@ -1871,7 +1871,7 @@ CONTAINS
   TYPE(Solver_t) :: Solver
   REAL(KIND=dp), TARGET :: x(*), b(*)
 
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
   INCLUDE 'mpif.h'
 
   INTEGER, ALLOCATABLE :: Owner(:)
@@ -1980,7 +1980,7 @@ CONTAINS
         CALL SPQR_SolveSystem( Solver, A, x, b, Free_Fact )
         CALL Cholmod_SolveSystem( Solver, A, x, b, Free_Fact )
 #endif
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
         CALL Permon_SolveSystem( Solver, A, x, b, Free_Fact )
 #endif
         RETURN

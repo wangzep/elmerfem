@@ -10212,7 +10212,7 @@ END FUNCTION SearchNodeL
 
     ScaleSystem = ListGetLogical( Params, 'Linear System Scaling', GotIt )
     IF ( .NOT. GotIt  ) ScaleSystem = .TRUE.
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
     IF ( C_ASSOCIATED(A % PermonMatrix) ) ScaleSystem = .FALSE.
 #endif
 

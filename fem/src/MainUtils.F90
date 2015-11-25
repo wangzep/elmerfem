@@ -109,8 +109,8 @@ CONTAINS
           CALL Fatal( 'CheckLinearSolverOptions', 'Cholmod solver has not been installed.' )
 #endif
         CASE( 'permon')
-#ifndef HAVE_PERMON
-          CALL Fatal( 'CheckLinearSolverOptions', 'Permon solver has not been installed.' )
+#ifndef HAVE_FETI4I
+          CALL Fatal( 'CheckLinearSolverOptions', 'FETI4I solver has not been installed.' )
 #endif
         CASE DEFAULT
           CALL Fatal( 'CheckLinearSolverOptions', 'Unknown direct solver method: ' // TRIM(str) )
