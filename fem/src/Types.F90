@@ -165,6 +165,7 @@ END INTERFACE
     TYPE(Solver_t), POINTER :: Solver => NULL()
 
     LOGICAL :: NoDirichlet = .FALSE.
+    REAL(KIND=dp), ALLOCATABLE :: Dvalues(:)
     LOGICAL, ALLOCATABLE :: ConstrainedDOF(:)
 
     INTEGER :: Subband, FORMAT, SolveCount, Comm=-1
@@ -189,7 +190,7 @@ END INTERFACE
     REAL(KIND=dp),  POINTER CONTIG :: MassValues(:)=>NULL(),DampValues(:)=>NULL(), &
         BulkValues(:)=>NULL(), BulkMassValues(:)=>NULL(), PrecValues(:)=>NULL()
 
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
     TYPE(C_PTR) :: PermonMatrix = C_NULL_PTR, PermonSolverInstance = C_NULL_PTR
 #endif
 #ifdef HAVE_MUMPS

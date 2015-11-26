@@ -1871,7 +1871,7 @@ CONTAINS
   TYPE(Solver_t) :: Solver
   REAL(KIND=dp), TARGET :: x(*), b(*)
 
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
   INCLUDE 'mpif.h'
 
   INTEGER, ALLOCATABLE :: Owner(:)
@@ -1893,9 +1893,9 @@ CONTAINS
         INTEGER(C_INT) :: gnum(*), dinds(*), n_ranks(*)
      END FUNCTION Permon_Initsolve
 
-     SUBROUTINE Permon_Solve( handle, x ) BIND(c,name='permon_solve')
+     SUBROUTINE Permon_Solve( handle, x, b ) BIND(c,name='permon_solve')
         USE, INTRINSIC :: ISO_C_BINDING
-        REAL(C_DOUBLE) :: x(*)
+        REAL(C_DOUBLE) :: x(*), b(*)
         TYPE(C_PTR), VALUE :: handle
      END SUBROUTINE Permon_solve
   END INTERFACE
@@ -1920,7 +1920,7 @@ CONTAINS
     DO i=1,A % NumberOfRows
       IF(A % ConstrainedDOF(i)) THEN
         j = j + 1
-        DirichletInds(j) = i; DirichletVals(j) = A % RHS(i)
+        DirichletInds(j) = i; DirichletVals(j) = A % Dvalues(i)
       END IF
     END DO
 
@@ -1937,7 +1937,7 @@ CONTAINS
          A % ParallelInfo % GlobalDOFs, nd,  DirichletInds, DirichletVals, n, neighbours )
   END IF
 
-  CALL Permon_Solve( A % PermonSolverInstance, x )
+  CALL Permon_Solve( A % PermonSolverInstance, x, b )
 #else
    CALL Fatal( 'Permon_SolveSystem', 'Permon Solver has not been installed.' )
 #endif
@@ -1980,7 +1980,7 @@ CONTAINS
         CALL SPQR_SolveSystem( Solver, A, x, b, Free_Fact )
         CALL Cholmod_SolveSystem( Solver, A, x, b, Free_Fact )
 #endif
-#ifdef HAVE_PERMON
+#ifdef HAVE_FETI4I
         CALL Permon_SolveSystem( Solver, A, x, b, Free_Fact )
 #endif
         RETURN

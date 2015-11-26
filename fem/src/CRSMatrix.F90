@@ -695,6 +695,10 @@ CONTAINS
     IF ( isDamp ) &
       isDamp = isDamp .AND. SIZE(A % DampValues) == SIZE(A % Values)
 
+     IF(ALLOCATED(A % ConstrainedDOF)) THEN
+        IF(A % ConstrainedDOF(n)) RETURN
+     END IF
+
     DO l=A % Rows(n),A % Rows(n+1)-1
        i = A % Cols(l)
        IF ( i == n ) CYCLE
