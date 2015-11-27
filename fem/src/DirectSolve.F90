@@ -1861,21 +1861,22 @@ CONTAINS
 
 
 !------------------------------------------------------------------------------
-!> Permon solver
+!> FETI4I solver
 !------------------------------------------------------------------------------
-  SUBROUTINE Permon_SolveSystem( Solver,A,x,b,Free_Fact )
+  SUBROUTINE FETI4I_SolveSystem( Solver,A,x,b,Free_Fact )
 !------------------------------------------------------------------------------
+#ifdef HAVE_FETI4I
+  USE FETI4I
+  INCLUDE 'mpif.h'
  
   LOGICAL, OPTIONAL :: Free_Fact
   TYPE(Matrix_t) :: A
   TYPE(Solver_t) :: Solver
   REAL(KIND=dp), TARGET :: x(*), b(*)
 
-#ifdef HAVE_FETI4I
-  INCLUDE 'mpif.h'
 
   INTEGER, ALLOCATABLE :: Owner(:)
-  INTEGER :: i,j,n,nd,ip,ierr,icntlft,nzloc
+  INTEGER :: i,j,n,nn,nd,ip,ierr,icntlft,nzloc
   LOGICAL :: Factorize, FreeFactorize, stat, matsym, matspd, scaled
 
   INTEGER, ALLOCATABLE :: memb(:), DirichletInds(:), Neighbours(:)
@@ -1883,22 +1884,6 @@ CONTAINS
   INTEGER :: Comm_active, Group_active, Group_world
 
   REAL(KIND=dp), ALLOCATABLE :: dbuf(:)
-
-  INTERFACE
-     FUNCTION Permon_InitSolve(n, gnum, nd, dinds, dvals, n_n, n_ranks) RESULT(handle) BIND(c,name='permon_initsolve') 
-        USE, INTRINSIC :: ISO_C_BINDING
-        TYPE(C_PTR) :: handle
-        INTEGER(C_INT), VALUE :: n, nd, n_n
-        REAL(C_DOUBLE) :: dvals(*)
-        INTEGER(C_INT) :: gnum(*), dinds(*), n_ranks(*)
-     END FUNCTION Permon_Initsolve
-
-     SUBROUTINE Permon_Solve( handle, x, b ) BIND(c,name='permon_solve')
-        USE, INTRINSIC :: ISO_C_BINDING
-        REAL(C_DOUBLE) :: x(*), b(*)
-        TYPE(C_PTR), VALUE :: handle
-     END SUBROUTINE Permon_solve
-  END INTERFACE
 
   IF ( PRESENT(Free_Fact) ) THEN
     IF ( Free_Fact ) THEN
@@ -1909,40 +1894,42 @@ CONTAINS
   Factorize = ListGetLogical( Solver % Values, 'Linear System Refactorize', stat )
   IF ( .NOT. stat ) Factorize = .TRUE.
 
-  IF ( Factorize .OR. .NOT.C_ASSOCIATED(A % PermonSolverInstance) ) THEN
-    IF ( C_ASSOCIATED(A % PermonSolverInstance) ) THEN
-       CALL Fatal( 'Permon', 're-entry not implemented' )
+  n = A % NumberOfRows
+
+  IF ( Factorize .OR. .NOT.C_ASSOCIATED(A % FETI4IInstance) ) THEN
+    IF ( C_ASSOCIATED(A % FETI4IInstance) ) THEN
+       CALL Fatal( 'FETI4ISolve', 're-entry not implemented' )
     END IF
 
     nd = COUNT(A % ConstrainedDOF)
     ALLOCATE(DirichletInds(nd), DirichletVals(nd))
     j = 0
-    DO i=1,A % NumberOfRows
+    DO i=1,n
       IF(A % ConstrainedDOF(i)) THEN
         j = j + 1
         DirichletInds(j) = i; DirichletVals(j) = A % Dvalues(i)
       END IF
     END DO
 
-    n = 0
+    nn = 0
     ALLOCATE(neighbours(Parenv % PEs))
     DO i=1,ParEnv % PEs
       IF( ParEnv % IsNeighbour(i) .AND. i-1/=ParEnv % myPE) THEN
-        n = n + 1
-        neighbours(n) = i-1
+        nn = nn + 1
+        neighbours(nn) = i-1
       END IF
     END DO
 
-    A % PermonSolverInstance = Permon_InitSolve( SIZE(A % ParallelInfo % GlobalDOFs), &
-         A % ParallelInfo % GlobalDOFs, nd,  DirichletInds, DirichletVals, n, neighbours )
+    CALL FETI4ICreateInstance( A % FETI4IInstance, A % FETI4IMatrix, n, &
+      b, A % ParallelInfo % GlobalDOFs, nn, neighbours, nd, DirichletInds, DirichletVals )
   END IF
 
-  CALL Permon_Solve( A % PermonSolverInstance, x, b )
+  CALL FETI4ISolve( A % FETI4IInstance, n, x )
 #else
-   CALL Fatal( 'Permon_SolveSystem', 'Permon Solver has not been installed.' )
+   CALL Fatal( 'FETI4I_SolveSystem', 'FETI4I Solver has not been installed.' )
 #endif
 !------------------------------------------------------------------------------
-  END SUBROUTINE Permon_SolveSystem
+  END SUBROUTINE FETI4I_SolveSystem
 !------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
@@ -1981,7 +1968,7 @@ CONTAINS
         CALL Cholmod_SolveSystem( Solver, A, x, b, Free_Fact )
 #endif
 #ifdef HAVE_FETI4I
-        CALL Permon_SolveSystem( Solver, A, x, b, Free_Fact )
+        CALL FETI4I_SolveSystem( Solver, A, x, b, Free_Fact )
 #endif
         RETURN
       END IF
@@ -2019,8 +2006,8 @@ CONTAINS
       CASE( 'pardiso' )
         CALL Pardiso_SolveSystem( Solver, A, x, b )
 
-      CASE( 'permon' )
-        CALL Permon_SolveSystem( Solver, A, x, b )
+      CASE( 'feti4i' )
+        CALL FETI4I_SolveSystem( Solver, A, x, b )
 
       CASE DEFAULT
         CALL Fatal( 'DirectSolver', 'Unknown direct solver method.' )

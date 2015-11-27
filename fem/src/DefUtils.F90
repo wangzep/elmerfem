@@ -2795,7 +2795,7 @@ CONTAINS
      IF(GetString(Solver % Values, 'Linear System Direct Method',Found)=='permon') THEN
        CALL UpdateGlobalEquations( A,G,b,f,n,x % DOFs, &
                             x % Perm(Indexes(1:n)), UElement=Element )
-       CALL UpdatePermonMatrix( A, G, n, x % DOFs, x % Perm(Indexes(1:n)) )
+       CALL UpdateFETI4IMatrix( A, G, n, x % DOFs, x % Perm(Indexes(1:n)) )
      ELSE
        CALL UpdateGlobalEquations( A,G,b,f,n,x % DOFs, &
                             x % Perm(Indexes(1:n)), UElement=Element )
@@ -2804,13 +2804,13 @@ CONTAINS
   END SUBROUTINE DefaultUpdateEquationsR
 !------------------------------------------------------------------------------
 
+
 !------------------------------------------------------------------------------
- SUBROUTINE UpdatePermonMatrix(A,G,n,dofs,nind)
+ SUBROUTINE UpdateFETI4IMatrix(A,G,n,dofs,nind)
 !------------------------------------------------------------------------------
 #ifdef HAVE_FETI4I
    use feti4i
 #endif
-
    TYPE(Matrix_t) :: A
    INTEGER :: n, dofs, nInd(:)
    REAL(KIND=dp) :: G(:,:)
@@ -2820,9 +2820,9 @@ CONTAINS
   INTEGER :: i,j,k,l,k1,k2
   INTEGER(C_INT), ALLOCATABLE :: ind(:)
 
-  IF(.NOT.C_ASSOCIATED(A % PermonMatrix)) THEN
-    A % NoDirichlet = .TRUE.
-    A % PermonMatrix = Permon_InitMatrix(A % NumberOFRows)
+#ifdef HAVE_FETI4I
+  IF(.NOT.C_ASSOCIATED(A % FETI4IMatrix)) THEN
+    CALL FETI4ICreateStiffnessMatrix(A % FETI4IMatrix, 1)
   END IF
 
   ALLOCATE(vals(n*n*dofs*dofs), ind(n*dofs))
@@ -2839,11 +2839,14 @@ CONTAINS
     END DO
   END DO
 
-  CALL Permon_UpdateMatrix( A % PermonMatrix, n*dofs, ind, vals )
+  CALL FETI4IAddElement( A % FETI4IMatrix, n*dofs, ind, vals )
+#endif
     
 !------------------------------------------------------------------------------
- END SUBROUTINE UpdatePermonMatrix
+ END SUBROUTINE UpdateFETI4IMatrix
 !------------------------------------------------------------------------------
+
+
 
 !------------------------------------------------------------------------------
   SUBROUTINE DefaultUpdateEquationsC( GC, FC, UElement, USolver, BulkUpdate ) 
@@ -3864,7 +3867,10 @@ CONTAINS
        IF(.NOT.Found) ScaleSystem=.TRUE.
      END IF
 #ifdef HAVE_FETI4I
-     IF(C_ASSOCIATED(A % PermonMatrix)) ScaleSystem = .FALSE.
+     IF(C_ASSOCIATED(A % FETI4IMatrix)) THEN
+        ScaleSystem = .FALSE.
+        A % NoDirichlet = .TRUE.
+     END IF
 #endif
 
      IF (ScaleSystem) THEN
@@ -4346,12 +4352,16 @@ CONTAINS
         CurrentModel % CurrentElement => SaveElement
      END DO
 
-     Found = .NOT. A % NoDirichlet
+
+     Found = .TRUE.
+#ifdef HAVE_FETI4I
+     Found = .NOT.C_ASSOCIATED(A % FETI4IMatrix)
+#endif
      IF ( Found ) THEN
         DO k=1,A % NumberOfRows
           IF ( A % ConstrainedDOF(k) ) THEN
             s = A % Values(A % Diag(k))
-            IF (s==0) s = 1
+            IF ( s==0 ) s = 1
 
             IF ( A % Symmetric ) THEN
               CALL CRS_SetSymmDirichlet(A,b,k,A % Dvalues(k)/s)
@@ -4363,8 +4373,8 @@ CONTAINS
           END IF
         END DO
         DEALLOCATE(A % Dvalues)
-        A % NoDirichlet = .FALSE.
      END IF
+     A % NoDirichlet = .FALSE.
 
      IF (ScaleSystem) THEN
        CALL BackScaleLinearSystem(Solver,A,b)

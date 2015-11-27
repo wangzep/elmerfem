@@ -191,7 +191,7 @@ END INTERFACE
         BulkValues(:)=>NULL(), BulkMassValues(:)=>NULL(), PrecValues(:)=>NULL()
 
 #ifdef HAVE_FETI4I
-    TYPE(C_PTR) :: PermonMatrix = C_NULL_PTR, PermonSolverInstance = C_NULL_PTR
+    TYPE(C_PTR) :: FETI4IMatrix = C_NULL_PTR, FETI4IInstance = C_NULL_PTR
 #endif
 #ifdef HAVE_MUMPS
     TYPE(dmumps_struc), POINTER :: MumpsID => NULL() ! Global distributed Mumps

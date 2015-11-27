@@ -76,7 +76,7 @@ CONTAINS
       str = ListGetString( Params,'Linear System Direct Method', Found )
       IF( Found ) THEN        
         IF ( ParEnv % PEs > 1 ) THEN
-          IF ( str /= 'mumps' .AND. str /= 'permon' ) THEN
+          IF ( str /= 'mumps' .AND. str /= 'feti4i' ) THEN
             CALL Warn( 'CheckLinearSolverOptions', 'Only MUMPS direct solver' // &
                 ' interface implemented in parallel, trying MUMPS!')
             str = 'mumps' 
@@ -108,7 +108,7 @@ CONTAINS
 #ifndef HAVE_CHOLMOD
           CALL Fatal( 'CheckLinearSolverOptions', 'Cholmod solver has not been installed.' )
 #endif
-        CASE( 'permon')
+        CASE( 'feti4i')
 #ifndef HAVE_FETI4I
           CALL Fatal( 'CheckLinearSolverOptions', 'FETI4I solver has not been installed.' )
 #endif

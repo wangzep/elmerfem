@@ -10213,7 +10213,7 @@ END FUNCTION SearchNodeL
     ApplyLimiter = ListGetLogical( Params,'Apply Limiter',GotIt ) 
     SkipZeroRhs = ListGetLogical( Params,'Skip Zero Rhs Test',GotIt )
 #ifdef HAVE_FETI4I
-    IF ( C_ASSOCIATED(A % PermonMatrix) ) THEN
+    IF ( C_ASSOCIATED(A % FETI4IMatrix) ) THEN
        ScaleSystem = .FALSE.
        SkipZeroRhs = .TRUE.
     END IF
