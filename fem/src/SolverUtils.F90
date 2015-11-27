@@ -4035,15 +4035,7 @@ CONTAINS
     !----------------------------------------------------------------
     IF( ANY(ActivePart) .OR. ANY(ActivePartAll) ) THEN    
       IF ( OrderByBCNumbering ) THEN
-        BCstr = 1
-        BCinc = 1
-        BCend = Model % NumberOfBCs
-        IF(A % Symmetric) THEN
-          BCstr = Model % NumberOfBCs
-          BCend =  1
-          BCinc = -1
-        END IF
-        DO i=BCstr,BCend,BCinc
+        DO i=1,Model % NUmberOfBCs
           BC = i
           IF(ReorderBCs) BC = BCOrder(BC)
           IF(.NOT. ActivePart(BC) .AND. .NOT. ActivePartAll(BC) ) CYCLE
@@ -4722,21 +4714,21 @@ CONTAINS
                   NTZeroing_done(m,kmax) = .TRUE.
                   b(lmax) = 0._dp
 
-                  IF(.NOT.A % NoDirichlet) CALL ZeroRow( A,lmax )
-
-                  NTZeroing_done(m,kmax) = .TRUE.                  
                   IF( .NOT. OffDiagonal ) THEN
                     b(lmax) = b(lmax) + Work(j)/DiagScaling(lmax)
                   END IF
 
                   ! Consider all components of the cartesian vector mapped to the 
                   ! N-T coordinate system. Should this perhaps have scaling included?
-                  IF( .NOT. OffDiagonal ) THEN
+                  CALL ZeroRow( A,lmax )
+                  IF( .NOT. OffDiagonal) THEN
                     DO k=1,dim
                       l = NDOFs * (Perm(Indexes(j))-1) + k
                       CALL SetMatrixElement( A,lmax,l,RotVec(k) )
                     END DO
                   END IF
+                  NTZeroing_done(m,kmax)   = .TRUE.
+                  A % ConstrainedDOF(lmax) = .FALSE.
                 END IF
               ELSE
                 CALL SetSinglePoint(k,DOF,Work(j),.FALSE.)
@@ -4884,32 +4876,29 @@ CONTAINS
       END IF
 
       IF ( A % FORMAT == MATRIX_SBAND ) THEN
-        CALL SBand_SetDirichlet( A,b,k,val )
-      ELSE IF ( A % FORMAT == MATRIX_CRS .AND. A % Symmetric .AND..NOT. A % NoDirichlet) THEN
-        CALL CRS_SetSymmDirichlet( A,b,k,val/DiagScaling(k) )
+        CALL SBand_SetDirichlet( A,b,k,s*val )
       ELSE
         IF (.NOT.A % NoDirichlet ) CALL ZeroRow( A,k )
+
         IF( .NOT. OffDiagonal ) THEN
-          IF (A % NoDirichlet ) THEN
-            A % Dvalues(k) = val / DiagScaling(k)
-          ELSE
-            s = A % Values(A % Diag(k)) 
-            IF (s==0) s=1._dp
-            CALL SetMatrixElement( A,k,k,s)
-            b(k) = s * val / DiagScaling(k)
+          IF(ALLOCATED(A % Dvalues)) A % Dvalues(k) =  val / DiagScaling(k)
+          IF( .NOT.A % NoDirichlet ) THEN
+            CALL SetMatrixElement( A,k,k,1._dp )
+            IF(.NOT.ALLOCATED(A % Dvalues)) b(k) = val / DiagScaling(k)
           END IF
-          IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(k) = .TRUE.
         END IF
+        IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(k) = .TRUE.
       END IF
 !------------------------------------------------------------------------------
     END SUBROUTINE SetSinglePoint
 !------------------------------------------------------------------------------
 
+
 !------------------------------------------------------------------------------
 !> Set values related to upper and lower limiters.
 !------------------------------------------------------------------------------
-  
     SUBROUTINE SetLimiterValues(n)
+!------------------------------------------------------------------------------
       INTEGER :: n
       REAL(KIND=dp) :: Work(n)
 
@@ -4921,27 +4910,15 @@ CONTAINS
           IF( k == 0 ) CYCLE
 
           IF( .NOT. LimitActive(nDofs*(k-1)+dof)) CYCLE
-
-          k = OffSet + NDOFs * (k-1) + DOF
-
-          IF ( A % FORMAT == MATRIX_SBAND ) THEN
-            CALL SBand_SetDirichlet( A,b,k,Work(j) )
-          ELSE IF ( A % FORMAT == MATRIX_CRS .AND. A % Symmetric ) THEN
-            CALL CRS_SetSymmDirichlet( A,b,k,Work(j)/DiagScaling(k) )
-          ELSE
-            IF(.NOT.A % NoDirichlet ) CALL ZeroRow( A,k )
-            IF( .NOT. OffDiagonal ) THEN
-              IF(.NOT.A % NoDirichlet ) CALL SetMatrixElement( A,k,k,1.0d0 )
-              b(k) = Work(j)/DiagScaling(k)
-            END IF
-          END IF
-          IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(k) = .TRUE.
+          CALL SetSinglePoint(k,DOF,Work(j),.FALSE.)
         END DO
       END IF
-
+!------------------------------------------------------------------------------
     END SUBROUTINE SetLimiterValues
+!------------------------------------------------------------------------------
 
 
+!------------------------------------------------------------------------------
 !> At first pass sum together the rows related to the periodic dofs.
 !------------------------------------------------------------------------------
    SUBROUTINE SetPeriodicBoundariesPass1( Model, A, b, &
@@ -5000,10 +4977,12 @@ CONTAINS
         k = Perm(ii)
         IF ( .NOT. Done(ii) .AND. k>0 ) THEN
           k = NDOFs * (k-1) + DOF
-          CALL ZeroRow( A,k )
-          
-          CALL AddToMatrixElement( A, k, k, 1.0_dp )
-          b(k) = 0.0_dp
+          IF( .NOT.A % NoDirichlet ) THEN
+            CALL ZeroRow( A,k )
+            CALL AddToMatrixElement( A, k, k, 1.0_dp )
+          ELSE
+          END IF
+          IF(ALLOCATED(A % Dvalues)) A % Dvalues(k) = 0._dp
           IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(k) = .TRUE.
           
           DO l = Projector % Rows(i), Projector % Rows(i+1)-1
@@ -5011,8 +4990,13 @@ CONTAINS
             m = Perm( Projector % Cols(l) )
             IF ( m > 0 ) THEN
               m = NDOFs * (m-1) + DOF
-              b(k) = b(k) - Scale * Projector % Values(l) * &
-                  Var % Values(m)/DiagScaling(k)
+              IF(ALLOCATED(A % Dvalues)) THEN
+                A % Dvalues(k) = A % Dvalues(k) - Scale * Projector % Values(l) * &
+                    Var % Values(m)/DiagScaling(k)
+              ELSE
+                b(k) = b(k) - Scale * Projector % Values(l) * &
+                    Var % Values(m)/DiagScaling(k)
+              END IF
             END IF
           END DO
         END IF
@@ -5702,9 +5686,9 @@ CONTAINS
     ! Manipulate the boundaries such that we need to modify only the r.h.s. in the actual linear solver
     DO k=1,A % NumberOfRows       
       IF( Var % ConstraintModesIndeces(k) == 0 ) CYCLE
-      CALL ZeroRow( A,k )
-      CALL SetMatrixElement( A,k,k,1._dp )
       b(k) = 0.0_dp
+      CALL ZeroRow(A,k)
+      CALL SetMatrixElement( A,k,k,1._dp )
     END DO
 
     
@@ -5756,8 +5740,8 @@ CONTAINS
            CALL ZeroRow( A,PermIndex )
            CALL SetMatrixElement( A,PermIndex,PermIndex,s )
         END IF
-        IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(PermIndex) = .TRUE.
       END IF
+      IF(ALLOCATED(A % ConstrainedDOF)) A % ConstrainedDOF(PermIndex) = .TRUE.
     END IF
 !------------------------------------------------------------------------------
   END SUBROUTINE SetDirichletPoint
@@ -10212,9 +10196,6 @@ END FUNCTION SearchNodeL
 
     ScaleSystem = ListGetLogical( Params, 'Linear System Scaling', GotIt )
     IF ( .NOT. GotIt  ) ScaleSystem = .TRUE.
-#ifdef HAVE_FETI4I
-    IF ( C_ASSOCIATED(A % PermonMatrix) ) ScaleSystem = .FALSE.
-#endif
 
     EigenAnalysis = Solver % NOFEigenValues > 0 .AND. &
         ListGetLogical( Params, 'Eigen Analysis',GotIt )
@@ -10231,7 +10212,12 @@ END FUNCTION SearchNodeL
 
     ApplyLimiter = ListGetLogical( Params,'Apply Limiter',GotIt ) 
     SkipZeroRhs = ListGetLogical( Params,'Skip Zero Rhs Test',GotIt )
-    SkipZeroRhs = SkipZeroRhs .OR. A % NoDirichlet
+#ifdef HAVE_FETI4I
+    IF ( C_ASSOCIATED(A % PermonMatrix) ) THEN
+       ScaleSystem = .FALSE.
+       SkipZeroRhs = .TRUE.
+    END IF
+#endif
 
     IF ( .NOT. ( RecursiveAnalysis .OR. ApplyLimiter .OR. SkipZeroRhs ) ) THEN
       bnorm = SQRT(ParallelReduction(SUM(b(1:n)**2)))      
@@ -10250,8 +10236,6 @@ END FUNCTION SearchNodeL
         RETURN
       END IF
     END IF
-    
-
 
     IF ( Solver % MultiGridLevel == -1  ) RETURN
 
