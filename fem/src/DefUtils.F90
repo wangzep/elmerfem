@@ -2792,7 +2792,7 @@ CONTAINS
      Indexes => GetIndexStore()
      n = GetElementDOFs( Indexes, Element, Solver )
 
-     IF(GetString(Solver % Values, 'Linear System Direct Method',Found)=='permon') THEN
+     IF(GetString(Solver % Values, 'Linear System Direct Method',Found)=='feti4i') THEN
        CALL UpdateGlobalEquations( A,G,b,f,n,x % DOFs, &
                             x % Perm(Indexes(1:n)), UElement=Element )
        CALL UpdateFETI4IMatrix( A, G, n, x % DOFs, x % Perm(Indexes(1:n)) )
