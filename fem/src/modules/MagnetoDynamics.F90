@@ -383,9 +383,10 @@ SUBROUTINE WhitneyAVSolver( Model,Solver,dt,Transient )
   LOGICAL, ALLOCATABLE :: TreeEdges(:)
   LOGICAL :: Stat, EigenAnalysis, TG, DoneAssembly=.FALSE., &
          SkipAssembly, ConstantSystem, ConstantBulk, FixJ, FoundRelax, &
-         PiolaVersion, SecondOrder, LFact, LFactFound, EdgeBasis
+         PiolaVersion, SecondOrder, LFact, LFactFound, EdgeBasis, HasPrecDampCoeff, &
+         HasStabC
 
-  REAL(KIND=dp) :: Relax
+  REAL(KIND=dp) :: Relax, PrecDampCoeff, stab_c
 
   TYPE(Variable_t), POINTER :: Var, FixJVar, CoordVar
   TYPE(Matrix_t), POINTER :: A
@@ -416,6 +417,9 @@ SUBROUTINE WhitneyAVSolver( Model,Solver,dt,Transient )
          CALL Info('WhitneyAVSolver', &
         'Using quadratic approximation, pyramidical elements are not yet available',Level=4)
   END IF
+
+  PrecDampCoeff = GetCReal(GetSolverParams(), 'Linear System Preconditioning Damp Coefficient', HasPrecDampCoeff)
+  stab_c = GetCReal(GetSolverParams(), 'Linear System Stabilization Coefficient', HasStabC)
 
   !Allocate some permanent storage, this is done first time only:
   !--------------------------------------------------------------
@@ -1662,6 +1666,7 @@ CONTAINS
                      RotMLoc(3,3), RotM(3,3,n)
     REAL(KIND=dp) :: Basis(n),dBasisdx(n,3),DetJ, L(3), G(3), M(3), FixJPot(nd)
     REAL(KIND=dp) :: LocalLamThick, LocalLamCond
+    REAL(KIND=dp) :: DAMP(nd,nd)
 
     CHARACTER(LEN=MAX_NAME_LEN):: LaminateStackModel, CoilType
 
@@ -1686,6 +1691,7 @@ CONTAINS
     STIFF = 0.0d0
     FORCE = 0.0d0
     MASS  = 0.0d0
+    DAMP  = 0.0_dp
 
     JAC = 0._dp
     Newton = .FALSE.
@@ -1866,7 +1872,8 @@ CONTAINS
          DO j = 1,nd-np
            q = j+np
            STIFF(p,q) = STIFF(p,q) + mu * &
-              SUM(RotWBasis(i,:)*RotWBasis(j,:))*detJ*IP%s(t)
+              SUM(RotWBasis(i,:)*RotWBasis(j,:))*detJ*IP%s(t) + &
+              stab_c*mu*SUM(WBasis(i,:)*WBasis(j,:))*detJ*IP%s(t)
            IF ( Newton ) THEN
              JAC(p,q) = JAC(p,q) + muder * SUM(B_ip(:)*RotWBasis(j,:)) * &
                  SUM(B_ip(:)*RotWBasis(i,:))*detJ*IP % s(t)/Babs
@@ -1892,7 +1899,20 @@ CONTAINS
 
          END DO
        END DO
+       IF(HasPrecDampCoeff .or. HasStabC) THEN
+         DO i = 1,nd-np
+           p = i+np
+           DO j = 1,nd-np
+             q = j+np
+             DAMP(p,q) = DAMP(p,q) + mu * &
+               SUM(WBasis(i,:)*WBasis(j,:))*detJ*IP%s(t)
+           END DO
+         END DO
+       END IF
     END DO
+
+    IF(HasPrecDampCoeff) CALL DefaultUpdatePrec(STIFF(1:nd,1:nd) + PrecDampCoeff*DAMP(1:nd,1:nd))
+    !IF(HasStabC) CALL DefaultUpdateDampR(stab_c*DAMP(1:nd,1:nd))
 
     IF ( Newton ) THEN
       STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + JAC
