@@ -291,7 +291,7 @@ SUBROUTINE WhitneyAVSolver_Init0(Model,Solver,dt,Transient)
   REAL(KIND=dp) :: dt
   LOGICAL :: Transient
 !------------------------------------------------------------------------------
-  LOGICAL :: Found, PiolaVersion, SecondOrder
+  LOGICAL :: Found, PiolaVersion, SecondOrder, LagrangeGauge
   TYPE(ValueList_t), POINTER :: SolverParams
 
   SolverParams => GetSolverParams()
@@ -299,6 +299,7 @@ SUBROUTINE WhitneyAVSolver_Init0(Model,Solver,dt,Transient)
     PiolaVersion = GetLogical(SolverParams, &
         'Use Piola Transform', Found )   
     SecondOrder = GetLogical(SolverParams, 'Quadratic Approximation', Found)
+    LagrangeGauge = GetLogical(SolverParams, 'Steady State Lagrange Gauge', Found)
     IF (PiolaVersion) THEN
       IF ( Transient ) THEN
         IF (SecondOrder) THEN
@@ -308,13 +309,23 @@ SUBROUTINE WhitneyAVSolver_Init0(Model,Solver,dt,Transient)
           CALL ListAddString( SolverParams, "Element", "n:1 e:1 -brick b:3 -quad_face b:2" )
         END IF
       ELSE
-        IF (SecondOrder) THEN
-          CALL ListAddString( SolverParams, "Element", &
-              "n:0 e:2 -brick b:6 -prism b:2 -quad_face b:4 -tri_face b:2" )  
+        IF (LagrangeGauge) THEN
+          IF (SecondOrder) THEN
+            CALL ListAddString( SolverParams, &
+              "Element", "n:1 e:2 -brick b:6 -prism b:2 -quad_face b:4 -tri_face b:2" )  
+          ELSE
+            CALL ListAddString( SolverParams, "Element", "n:1 e:1 -brick b:3 -quad_face b:2" )
+          END IF
         ELSE
-          CALL ListAddString( SolverParams, "Element", "n:0 e:1 -brick b:3 -quad_face b:2" )
+          IF (SecondOrder) THEN
+            CALL ListAddString( SolverParams, "Element", &
+              "n:0 e:2 -brick b:6 -prism b:2 -quad_face b:4 -tri_face b:2" )  
+          ELSE
+            CALL ListAddString( SolverParams, "Element", "n:0 e:1 -brick b:3 -quad_face b:2" )
+          END IF
         END IF
       END IF
+
     ELSE
       IF ( Transient ) THEN
         CALL ListAddString( SolverParams, "Element", "n:1 e:1" )
@@ -384,7 +395,7 @@ SUBROUTINE WhitneyAVSolver( Model,Solver,dt,Transient )
   LOGICAL :: Stat, EigenAnalysis, TG, DoneAssembly=.FALSE., &
          SkipAssembly, ConstantSystem, ConstantBulk, FixJ, FoundRelax, &
          PiolaVersion, SecondOrder, LFact, LFactFound, EdgeBasis, HasPrecDampCoeff, &
-         HasStabC
+         HasStabC, LagrangeGauge
 
   REAL(KIND=dp) :: Relax, PrecDampCoeff, stab_c
 
@@ -420,6 +431,7 @@ SUBROUTINE WhitneyAVSolver( Model,Solver,dt,Transient )
 
   PrecDampCoeff = GetCReal(GetSolverParams(), 'Linear System Preconditioning Damp Coefficient', HasPrecDampCoeff)
   stab_c = GetCReal(GetSolverParams(), 'Linear System Stabilization Coefficient', HasStabC)
+  LagrangeGauge = GetLogical(GetSolverParams(), 'Steady State Lagrange Gauge', Found)
 
   !Allocate some permanent storage, this is done first time only:
   !--------------------------------------------------------------
@@ -1851,6 +1863,10 @@ CONTAINS
                  ! stiffness matrix (anisotropy taken into account)
                  ! ------------------------------------------------
                  STIFF(q,p) = STIFF(q,p) + SUM(MATMUL(C, dBasisdx(i,:))*WBasis(j,:))*detJ*IP % s(t)
+                 IF(LagrangeGauge) THEN
+                   STIFF(q,p) = STIFF(q,p) + SUM(dBasisdx(i,:)*WBasis(j,:))*detJ*IP % s(t)
+                   STIFF(p,q) = STIFF(p,q) + SUM(dBasisdx(i,:)*WBasis(j,:))*detJ*IP % s(t)
+                 END IF
                END DO
              END DO
            END IF
