@@ -1863,10 +1863,6 @@ CONTAINS
                  ! stiffness matrix (anisotropy taken into account)
                  ! ------------------------------------------------
                  STIFF(q,p) = STIFF(q,p) + SUM(MATMUL(C, dBasisdx(i,:))*WBasis(j,:))*detJ*IP % s(t)
-                 IF(LagrangeGauge) THEN
-                   STIFF(q,p) = STIFF(q,p) + SUM(dBasisdx(i,:)*WBasis(j,:))*detJ*IP % s(t)
-                   STIFF(p,q) = STIFF(p,q) + SUM(dBasisdx(i,:)*WBasis(j,:))*detJ*IP % s(t)
-                 END IF
                END DO
              END DO
            END IF
@@ -1884,7 +1880,14 @@ CONTAINS
        DO i = 1,nd-np
          p = i+np
          FORCE(p) = FORCE(p) + (SUM(L*WBasis(i,:)) + &
-            SUM(M*RotWBasis(i,:)))*detJ*IP%s(t) 
+           SUM(M*RotWBasis(i,:)))*detJ*IP%s(t) 
+         DO j = 1, np
+           IF(LagrangeGauge) THEN
+             q = j
+             STIFF(q,p) = STIFF(q,p) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
+             STIFF(p,q) = STIFF(p,q) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
+           END IF
+         END DO
          DO j = 1,nd-np
            q = j+np
            STIFF(p,q) = STIFF(p,q) + mu * &
