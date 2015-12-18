@@ -857,14 +857,8 @@ CONTAINS
       END DO
       DEALLOCATE(bC,xC)
     ELSE
-      if(ListGetLogical(params, "zero starting guess")) then
-        x = 0._dp
-        write (*,*), 'DEBUG: resetting starting guess'
-      else
-        write (*,*), 'DEBUG: not resetting starting guess'
-      end if
-      CALL IterCall( iterProc, x, b, ipar, dpar, work, &
-        mvProc, pcondProc, pcondrProc, dotProc, normProc, stopcProc )
+        CALL IterCall( iterProc, x, b, ipar, dpar, work, &
+                       mvProc, pcondProc, pcondrProc, dotProc, normProc, stopcProc )
     ENDIF
 #else
     CALL IterCall( iterProc, x, b, ipar, dpar, work, &
