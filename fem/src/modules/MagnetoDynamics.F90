@@ -477,8 +477,11 @@ SUBROUTINE WhitneyAVSolver( Model,Solver,dt,Transient )
     FixJ = ListCheckPrefixAnyBodyForce(Model, 'Current Density')
   END IF
   IF (FixJ) THEN
+    CALL Info('WhitneyAVSolver','Fixing source current to be divergence free',Level=8)
     CALL JfixPotentialSolver(Model,Solver,dt,Transient)
     FixJVar => VariableGet(Mesh % Variables, 'Jfix')
+    IF( GetLogical(GetSolverParams(),'Fix Input Current and Exit',Found ) ) RETURN
+    CALL Info('WhitneyAVSolver','Fixing source current done',Level=14)
   END IF
 
   ! 
@@ -585,6 +588,7 @@ CONTAINS
        CALL GetRealVector( BodyForce, Load(4:6,1:n), &
                 'Magnetization', FoundMagnetization )
 	Load(7,1:n) = GetReal( BodyForce, 'Electric Potential', Found )
+	Load(8,1:n) = GetReal( BodyForce, 'Current Potential', Found )
      END IF
 
      Material => GetMaterial( Element )
@@ -1771,7 +1775,11 @@ CONTAINS
 
        ! Add -C * grad(V^s), where C is a tensor
        ! -----------------------------------------
-       L = L-MATMUL(C, MATMUL(LOAD(7,1:n), dBasisdx(1:n,:)))
+       L = L - MATMUL(C, MATMUL(LOAD(7,1:n), dBasisdx(1:n,:)))
+
+       ! Add -1 * grad(V^c)
+       ! -----------------------------------------
+       L = L - MATMUL(LOAD(8,1:n), dBasisdx(1:n,:))
 
        IF ( HBCurve ) THEN
          B_ip = MATMUL( Aloc(np+1:nd), RotWBasis(1:nd-np,:) )
@@ -2579,9 +2587,9 @@ CONTAINS
     
     n = MAX(Solver % Mesh % MaxElementDOFs, Solver % Mesh % MaxElementNodes)
     IF (A % COMPLEX) THEN
-      ALLOCATE( Load_c(3,n), STIFF_C(n,n), FORCE_C(n) )
+      ALLOCATE( Load_c(5,n), STIFF_C(n,n), FORCE_C(n) )
     ELSE
-      ALLOCATE( Load_r(3,n), STIFF_R(n,n), FORCE_R(n) )
+      ALLOCATE( Load_r(5,n), STIFF_R(n,n), FORCE_R(n) )
     END IF
     ALLOCATE( Basis(n), dBasisdx(n,3) )
 
@@ -2607,8 +2615,12 @@ CONTAINS
       IF (ASSOCIATED(BodyForce)) THEN
         IF (A % COMPLEX ) THEN
           CALL GetComplexVector(BodyForce,Load_C(1:3,1:n),'Current Density',Found)
+          Load_C(4,1:n) = GetReal( BodyForce, 'Electric Potential im', Found)
+          Load_C(5,1:n) = GetReal( BodyForce, 'Current Potential im', Found )
         ELSE
           CALL GetRealVector(BodyForce,Load_R(1:3,1:n),'Current Density',Found)
+          Load_R(4,1:n) = GetReal( BodyForce, 'Electric Potential', Found )
+          Load_R(5,1:n) = GetReal( BodyForce, 'Current Potential', Found )
         END IF
       END IF
 
@@ -2624,7 +2636,8 @@ CONTAINS
               STIFF_C(p,q) = STIFF_C(p,q) + Weight * SUM(dBasisdx(q,:)*dBasisdx(p,:))
             END DO
           END DO
-          L_C = MATMUL( Load_C(:,1:n), Basis(1:n) )
+          L_C = MATMUL( Load_C(1:3,1:n), Basis(1:n) )
+          L_C = L_C + MATMUL(Load_C(5,1:n), dBasisdx(1:n,:))
           FORCE_C(1:n) = FORCE_C(1:n) + MATMUL(dBasisdx(1:n,:),L_C)*Weight
         ELSE
           DO p=1,n
@@ -2632,7 +2645,12 @@ CONTAINS
               STIFF_R(p,q) = STIFF_R(p,q) + Weight * SUM(dBasisdx(q,:)*dBasisdx(p,:))
             END DO
           END DO
-          L_R = MATMUL( Load_R(:,1:n), Basis(1:n) )
+          L_R = MATMUL( Load_R(1:3,1:n), Basis(1:n) )
+          
+          !L_R = L_R-MATMUL(C, MATMUL(LOAD(4,1:n), dBasisdx(1:n,:)))
+
+          L_R = L_R + MATMUL(Load_R(5,1:n), dBasisdx(1:n,:))
+        
           FORCE_R(1:n) = FORCE_R(1:n) + MATMUL(dBasisdx(1:n,:),L_R)*Weight
         END IF
       END DO
@@ -2986,7 +3004,7 @@ SUBROUTINE WhitneyAVHarmonicSolver( Model,Solver,dt,Transient )
        'Variable is not properly defined for time harmonic AV solver, Use: Variable = A[A re:1 A im:1]')
 
      N = Mesh % MaxElementDOFs  ! just big enough
-     ALLOCATE( FORCE(N), LOAD(7,N), STIFF(N,N), &
+     ALLOCATE( FORCE(N), LOAD(8,N), STIFF(N,N), &
           MASS(N,N), Tcoef(3,3,N), RotM(3,3,N), &
           GapLength(N), AirGapMu(N), Acoef(N), LamCond(N), &
           LamThick(N), STAT=istat )
@@ -3067,6 +3085,8 @@ CONTAINS
           Load(7,1:n) = GetReal( BodyForce, 'Electric Potential', Found )
           Load(7,1:n) = CMPLX( REAL(Load(7,1:n)), &
               GetReal( BodyForce, 'Electric Potential im', Found), KIND=dp)
+
+          Load(8,1:n) = GetReal( BodyForce, 'Current Potential', Found )
        END IF
 
        Material => GetMaterial( Element )
@@ -4248,7 +4268,11 @@ CONTAINS
 
        ! Compute C * grad(V), where C is a tensor
        ! -----------------------------------------
-       L = L-MATMUL(C, MATMUL(LOAD(7,1:n), dBasisdx(1:n,:)))
+       L = L - MATMUL(C, MATMUL(LOAD(7,1:n), dBasisdx(1:n,:)))
+
+       ! Compute grad(V_c)
+       ! -----------------------------------------
+       L = L + MATMUL(LOAD(8,1:n), dBasisdx(1:n,:))
 
        ! Compute element stiffness matrix and force vector:
        ! --------------------------------------------------

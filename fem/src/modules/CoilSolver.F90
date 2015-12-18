@@ -1402,8 +1402,8 @@ FUNCTION UnitedPotentialNormalized( Model, n, t ) RESULT(f)
     DesiredCurrentDensity = ListGetCReal( Model % Simulation,'Desired Current Density',Found)
     IF(.NOT. Found ) DesiredCurrentDensity = 1.0_dp
 
-    n = Model % Solver % Mesh % MaxElementNodes
-    ALLOCATE( Basis(n), dBasisdx(n,3), NodalPot(n), Nodes % x(n), Nodes % y(n), Nodes % z(n) )
+    m = Model % Solver % Mesh % MaxElementNodes
+    ALLOCATE( Basis(m), dBasisdx(m,3), NodalPot(m), Nodes % x(m), Nodes % y(m), Nodes % z(m) )
 
     Visited = .TRUE.
   END IF
@@ -1411,8 +1411,8 @@ FUNCTION UnitedPotentialNormalized( Model, n, t ) RESULT(f)
   Element => Model % CurrentElement
 
   IF( .NOT. ASSOCIATED( Element, PrevElement ) ) THEN
-    m = GetElementNOFNodes()
-    
+    m = GetElementNOFNodes( Element )
+
     ! One could use as well max or mean, for example
     ! Consistancy is most important
     
