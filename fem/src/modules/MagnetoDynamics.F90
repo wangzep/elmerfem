@@ -432,6 +432,7 @@ SUBROUTINE WhitneyAVSolver( Model,Solver,dt,Transient )
   PrecDampCoeff = GetCReal(GetSolverParams(), 'Linear System Preconditioning Damp Coefficient', HasPrecDampCoeff)
   stab_c = GetCReal(GetSolverParams(), 'Linear System Stabilization Coefficient', HasStabC)
   LagrangeGauge = GetLogical(GetSolverParams(), 'Steady State Lagrange Gauge', Found)
+  IF(LagrangeGauge) CALL Info("WhitneyAVSolver", "Utilizing Lagrange multipliers for gauge condition in steady state computation")
 
   !Allocate some permanent storage, this is done first time only:
   !--------------------------------------------------------------
@@ -1678,7 +1679,7 @@ CONTAINS
                      RotMLoc(3,3), RotM(3,3,n)
     REAL(KIND=dp) :: Basis(n),dBasisdx(n,3),DetJ, L(3), G(3), M(3), FixJPot(nd)
     REAL(KIND=dp) :: LocalLamThick, LocalLamCond
-    REAL(KIND=dp) :: DAMP(nd,nd)
+    REAL(KIND=dp) :: DAMP(nd,nd), SaddleGauge(nd,nd)
 
     CHARACTER(LEN=MAX_NAME_LEN):: LaminateStackModel, CoilType
 
@@ -1704,6 +1705,7 @@ CONTAINS
     FORCE = 0.0d0
     MASS  = 0.0d0
     DAMP  = 0.0_dp
+    SaddleGauge  = 0.0_dp
 
     JAC = 0._dp
     Newton = .FALSE.
@@ -1881,18 +1883,10 @@ CONTAINS
          p = i+np
          FORCE(p) = FORCE(p) + (SUM(L*WBasis(i,:)) + &
            SUM(M*RotWBasis(i,:)))*detJ*IP%s(t) 
-         DO j = 1, np
-           IF(LagrangeGauge) THEN
-             q = j
-             STIFF(q,p) = STIFF(q,p) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
-             STIFF(p,q) = STIFF(p,q) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
-           END IF
-         END DO
          DO j = 1,nd-np
            q = j+np
            STIFF(p,q) = STIFF(p,q) + mu * &
-              SUM(RotWBasis(i,:)*RotWBasis(j,:))*detJ*IP%s(t) + &
-              stab_c*mu*SUM(WBasis(i,:)*WBasis(j,:))*detJ*IP%s(t)
+              SUM(RotWBasis(i,:)*RotWBasis(j,:))*detJ*IP%s(t)
            IF ( Newton ) THEN
              JAC(p,q) = JAC(p,q) + muder * SUM(B_ip(:)*RotWBasis(j,:)) * &
                  SUM(B_ip(:)*RotWBasis(i,:))*detJ*IP % s(t)/Babs
@@ -1918,6 +1912,18 @@ CONTAINS
 
          END DO
        END DO
+
+       IF(LagrangeGauge) THEN
+         DO i = 1,nd-np
+           p = i+np
+           DO j = 1, np
+             q = j
+             SaddleGauge(q,p) = SaddleGauge(q,p) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
+             SaddleGauge(p,q) = SaddleGauge(p,q) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
+           END DO
+         END DO
+       END IF
+
        IF(HasPrecDampCoeff .or. HasStabC) THEN
          DO i = 1,nd-np
            p = i+np
@@ -1931,7 +1937,15 @@ CONTAINS
     END DO
 
     IF(HasPrecDampCoeff) CALL DefaultUpdatePrec(STIFF(1:nd,1:nd) + PrecDampCoeff*DAMP(1:nd,1:nd))
-    !IF(HasStabC) CALL DefaultUpdateDampR(stab_c*DAMP(1:nd,1:nd))
+    IF(HasStabC) STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + stab_c*DAMP
+    IF(LagrangeGauge) THEN
+      !DEBUG
+      !DO i = 1,nd
+        !write (*,*), abs(SaddleGauge(i,:)) > 0
+      !END DO
+      !write (*,*), "-------------------------"
+      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + SaddleGauge(1:nd,1:nd)
+    END IF
 
     IF ( Newton ) THEN
       STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + JAC
