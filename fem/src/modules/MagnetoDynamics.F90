@@ -1914,12 +1914,16 @@ CONTAINS
        END DO
 
        IF(LagrangeGauge) THEN
-         DO i = 1,nd-np
-           p = i+np
-           DO j = 1, np
-             q = j
+         DO j = 1, np
+           q = j
+           DO i = 1,nd-np
+             p = i+np
              SaddleGauge(q,p) = SaddleGauge(q,p) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
              SaddleGauge(p,q) = SaddleGauge(p,q) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
+           END DO
+           DO i = 1, np
+             p = i
+             SaddleGauge(p,q) = SaddleGauge(p,q) + Basis(j)*Basis(i)*detJ*IP % s(t) 
            END DO
          END DO
        END IF
