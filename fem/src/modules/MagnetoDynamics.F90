@@ -1923,7 +1923,7 @@ CONTAINS
            END DO
            DO i = 1, np
              p = i
-             SaddleGauge(p,q) = SaddleGauge(p,q) + Basis(j)*Basis(i)*detJ*IP % s(t) 
+             SaddleGauge(p,q) = SaddleGauge(p,q) + Basis(j)*Basis(i)*detJ*IP % s(t) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
            END DO
          END DO
        END IF
