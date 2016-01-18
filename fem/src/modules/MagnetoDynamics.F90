@@ -1948,7 +1948,9 @@ CONTAINS
         !write (*,*), abs(SaddleGauge(i,:)) > 0
       !END DO
       !write (*,*), "-------------------------"
-      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + SaddleGauge(1:nd,1:nd)
+
+      !STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + SaddleGauge(1:nd,1:nd)
+      CALL DefaultUpdateStab(SaddleGauge(1:nd,1:nd))
     END IF
 
     IF ( Newton ) THEN
@@ -6360,7 +6362,7 @@ END SUBROUTINE MagnetoDynamicsCalcFields_Init
        CALL LocalSol(EL_ML,   1, n, MASS, FORCE, pivot, Dofs)
        CALL LocalSol(EL_ML2,  1, n, MASS, FORCE, pivot, Dofs)
        CALL LocalSol(EL_MST,  6*vdofs, n, MASS, FORCE, pivot, Dofs)
-       CALL LocalSol(EL_NF,   3, n, MASS, FORCE, pivot, Dofs)
+       CALL LocalSol(EL_NF,   3, n, MASS, FORCE, pivot, Dofs, trivial=.TRUE.)
      END IF
    END DO
 
@@ -6817,16 +6819,18 @@ CONTAINS
 
 
 !------------------------------------------------------------------------------
- SUBROUTINE LocalSol(Var, m, n, A, b, pivot, dofs )
+SUBROUTINE LocalSol(Var, m, n, A, b, pivot, dofs, trivial)
 !------------------------------------------------------------------------------
    TYPE(Variable_t), POINTER :: Var
    INTEGER :: pivot(:), m,n,dofs
    REAL(KIND=dp) :: b(:,:), A(:,:)
+   LOGICAL, OPTiONAL :: trivial
 !------------------------------------------------------------------------------
    INTEGER :: ind(n), i
    REAL(KIND=dp) :: x(n)
 !------------------------------------------------------------------------------
    IF(.NOT. ASSOCIATED(var)) RETURN
+   IF(.NOT. PRESENT(trivial)) trivial = .FALSE.
 
    IF( ANY( Var % Perm( Element % DGIndexes(1:n) ) <= 0 ) ) THEN
      PRINT *,'size',SIZE( Var % Perm ), MAXVAL( Element % DGIndexes(1:n))
@@ -6840,12 +6844,19 @@ CONTAINS
    ind(1:n) = Var % DOFs*(Var % Perm(Element % DGIndexes(1:n))-1)
 
 
-   DO i=1,m
-      dofs = dofs+1
-      x = b(1:n,dofs)
-      CALL LUSolve(n,MASS,x,pivot)
-      Var % Values(ind(1:n)+i) = x(1:n)
-   END DO
+   IF(.NOT. trivial) THEN
+     DO i=1,m
+       dofs = dofs+1
+       x = b(1:n,dofs)
+       CALL LUSolve(n,MASS,x,pivot)
+       Var % Values(ind(1:n)+i) = x(1:n)
+     END DO
+   ELSE
+     DO i=1,m
+       dofs = dofs + 1
+       Var % Values(ind(1:n)+i) = b(1:n,dofs)
+     END DO
+   END IF
 !------------------------------------------------------------------------------
  END SUBROUTINE LocalSol
 !------------------------------------------------------------------------------

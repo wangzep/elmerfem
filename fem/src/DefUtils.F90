@@ -62,6 +62,10 @@ MODULE DefUtils
      MODULE PROCEDURE DefaultUpdatePrecR, DefaultUpdatePrecC
    END INTERFACE
 
+   INTERFACE DefaultUpdateStab
+     MODULE PROCEDURE DefaultUpdateStabR
+   END INTERFACE
+
    INTERFACE DefaultUpdateMass
      MODULE PROCEDURE DefaultUpdateMassR, DefaultUpdateMassC
    END INTERFACE
@@ -3125,6 +3129,74 @@ CONTAINS
 !------------------------------------------------------------------------------
 
 
+!------------------------------------------------------------------------------
+  SUBROUTINE DefaultUpdateStabR( M, UElement, USolver ) 
+!------------------------------------------------------------------------------
+     TYPE(Solver_t), OPTIONAL,TARGET   :: USolver
+     TYPE(Element_t), OPTIONAL, TARGET :: UElement
+     REAL(KIND=dp)   :: M(:,:)
+
+     TYPE(Solver_t), POINTER   :: Solver
+     TYPE(Matrix_t), POINTER   :: A
+     TYPE(Variable_t), POINTER :: x
+     TYPE(Element_t), POINTER  :: Element, P1, P2
+
+     REAL(KIND=dp),  POINTER :: SaveValues(:)
+
+     INTEGER :: i,j,n
+     INTEGER, POINTER :: Indexes(:)
+
+     IF ( PRESENT( USolver ) ) THEN
+        Solver => USolver
+        A => Solver % Matrix
+        x => Solver % Variable
+     ELSE
+        Solver => CurrentModel % Solver
+        A => Solver % Matrix
+        x => Solver % Variable
+     END IF
+
+     IF ( PRESENT( UElement ) ) THEN
+        Element => UElement 
+     ELSE
+        Element => CurrentModel % CurrentElement
+     END IF
+
+     Indexes => GetIndexStore()
+     n = GetElementDOFs( Indexes, Element, Solver )
+
+     IF ( ParEnv % PEs > 1 ) THEN
+       IF ( ASSOCIATED(Element % BoundaryInfo) ) THEN
+          P1 => Element % BoundaryInfo % Left
+          P2 => Element % BoundaryInfo % Right
+          IF ( ASSOCIATED(P1) .AND. ASSOCIATED(P2) ) THEN
+            IF ( P1 % PartIndex/=ParEnv % myPE .AND. &
+                 P2 % PartIndex/=ParEnv % myPE )RETURN
+
+            IF ( P1 % PartIndex/=ParEnv % myPE .OR. &
+                 P2 % PartIndex/=ParEnv % myPE ) M=M/2
+          ELSE IF ( ASSOCIATED(P1) ) THEN
+            IF ( P1 % PartIndex /= ParEnv % myPE ) RETURN
+          ELSE IF ( ASSOCIATED(P2) ) THEN
+            IF ( P2 % PartIndex /= ParEnv % myPE ) RETURN
+          END IF
+       ELSE IF ( Element % PartIndex/=ParEnv % myPE ) THEN
+          RETURN
+       END IF
+     END IF
+
+     IF ( .NOT. ASSOCIATED( A % StabValues ) ) THEN
+       ALLOCATE( A % StabValues(SIZE(A % Values)) )
+       A % StabValues = 0.0d0
+     END IF
+
+     SaveValues => A % MassValues
+     A % MassValues => A % StabValues
+     CALL UpdateMassMatrix( A, M, n, x % DOFs, x % Perm(Indexes(1:n)) )
+     A % MassValues => SaveValues
+!------------------------------------------------------------------------------
+  END SUBROUTINE DefaultUpdateStabR
+!------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
   SUBROUTINE DefaultUpdatePrecR( M, UElement, USolver ) 
