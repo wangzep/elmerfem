@@ -1923,7 +1923,8 @@ CONTAINS
            END DO
            DO i = 1, np
              p = i
-             SaddleGauge(p,q) = SaddleGauge(p,q) + Basis(j)*Basis(i)*detJ*IP % s(t) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
+             !SaddleGauge(p,q) = SaddleGauge(p,q) + Basis(j)*Basis(i)*detJ*IP % s(t) + SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
+             SaddleGauge(p,q) = SaddleGauge(p,q) - (1.0D2/mu)*SUM(dBasisdx(j,:)*dBasisdx(i,:))*detJ*IP % s(t)
            END DO
          END DO
        END IF
@@ -1949,8 +1950,8 @@ CONTAINS
       !END DO
       !write (*,*), "-------------------------"
 
-      !STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + SaddleGauge(1:nd,1:nd)
-      CALL DefaultUpdateStab(SaddleGauge(1:nd,1:nd))
+      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + SaddleGauge(1:nd,1:nd)
+      !CALL DefaultUpdateStab(SaddleGauge(1:nd,1:nd))
     END IF
 
     IF ( Newton ) THEN
