@@ -435,10 +435,18 @@ SUBROUTINE WhitneyAVSolver( Model,Solver,dt,Transient )
         'Using quadratic approximation, pyramidical elements are not yet available',Level=4)
   END IF
 
+  LagrangeGauge = GetLogical(GetSolverParams(), 'Steady State Lagrange Gauge', Found)
+
   PrecDampCoeff = GetCReal(GetSolverParams(), 'Linear System Preconditioning Damp Coefficient', HasPrecDampCoeff)
   stab_c = GetCReal(GetSolverParams(), 'Linear System Stabilization Coefficient', HasStabC)
-  LagrangeGauge = GetLogical(GetSolverParams(), 'Steady State Lagrange Gauge', Found)
-  IF(LagrangeGauge) CALL Info("WhitneyAVSolver", "Utilizing Lagrange multipliers for gauge condition in steady state computation")
+  IF(.NOT. HasStabC) stab_c = 1.0
+
+  IF(LagrangeGauge) THEN
+    CALL Info("WhitneyAVSolver", "Utilizing Lagrange multipliers for gauge condition in steady state computation")
+    HasStabC = .FALSE.
+  END IF
+
+
 
   !Allocate some permanent storage, this is done first time only:
   !--------------------------------------------------------------
@@ -1960,7 +1968,7 @@ CONTAINS
            DO i = 1, np
              p = i
              !SaddleGauge(p,q) = SaddleGauge(p,q) - Basis(j)*Basis(i)*detJ*IP % s(t) - SUM(dBasisdx(j,:)*WBasis(i,:))*detJ*IP % s(t)
-             SaddleGauge(p,q) = SaddleGauge(p,q) - SUM(dBasisdx(j,:)*dBasisdx(i,:))*detJ*IP % s(t)
+             SaddleGauge(p,q) = SaddleGauge(p,q) - stab_c*SUM(dBasisdx(j,:)*dBasisdx(i,:))*detJ*IP % s(t)
            END DO
          END DO
        END IF
@@ -1986,6 +1994,7 @@ CONTAINS
       !END DO
       !write (*,*), "-------------------------"
 
+      !IF(.not. HasStabC) stab_c = 1.0_dp
       STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + SaddleGauge(1:nd,1:nd)
       !CALL DefaultUpdateStab(SaddleGauge(1:nd,1:nd))
     END IF
