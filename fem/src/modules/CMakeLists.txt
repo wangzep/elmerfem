@@ -12,12 +12,12 @@ MACRO(ADD_ELMER_MODULE BASENAME)
     FILE(GLOB DIR_SRC_FILES "${_parsedArgs_DIRECTORY}/*.F90")
     SET(_SOURCES ${DIR_SRC_FILES})
   ELSEIF(_parsedArgs_SOURCES)
-    SET(SOURCES ${_parsedArgs_SOURCES})
+    SET(_SOURCES ${_parsedArgs_SOURCES})
   ELSE()
-    SET(SOURCES ${BASENAME}.F90)
+    SET(_SOURCES ${BASENAME}.F90)
   ENDIF()
 
-  ADD_LIBRARY(${BASENAME} SHARED ${SOURCES})
+  ADD_LIBRARY(${BASENAME} SHARED ${_SOURCES})
 
   SET_TARGET_PROPERTIES(${BASENAME} PROPERTIES PREFIX "")
   SET_TARGET_PROPERTIES(${BASENAME} PROPERTIES LINKER_LANGUAGE Fortran)
@@ -25,43 +25,26 @@ MACRO(ADD_ELMER_MODULE BASENAME)
   ADD_DEPENDENCIES(${BASENAME} elmersolver)
   INSTALL(TARGETS ${BASENAME} 
     LIBRARY DESTINATION "share/elmersolver/lib"
-    RUNTIME DESTINATION "share/elmersolver/lib"
-    ARCHIVE DESTINATION "share/elmersolver/lib")
+    RUNTIME DESTINATION "share/elmersolver/lib")
+    #ARCHIVE DESTINATION "share/elmersolver/lib")
 ENDMACRO()
 
+# Turn .F90 files into modules
 FILE(GLOB SRC_FILES *.F90)
 
 FOREACH(FNAME ${SRC_FILES})
   GET_FILENAME_COMPONENT(BASENAME ${FNAME} NAME_WE)
-  
   ADD_ELMER_MODULE(${BASENAME})
-
-  #IF(NOT(${BASENAME} MATCHES "^MagnetoDynamicsObj"))
-    #SET_TARGET_PROPERTIES(${BASENAME} PROPERTIES PREFIX "")
-    #SET_TARGET_PROPERTIES(${BASENAME} PROPERTIES LINKER_LANGUAGE Fortran)
-    #TARGET_LINK_LIBRARIES(${BASENAME} elmersolver)
-    #ADD_DEPENDENCIES(${BASENAME} elmersolver)
-
-    ##IF(${BASENAME} STREQUAL "EliminateDirichlet")
-      ##IF(NOT(WIN32))
-        ##INSTALL(TARGETS ${BASENAME} 
-          ##ARCHIVE DESTINATION "share/elmersolver/lib"
-          ##LIBRARY DESTINATION "share/elmersolver/lib")
-      ##ELSE()
-        ##INSTALL(TARGETS ${BASENAME}
-          ##RUNTIME DESTINATION "share/elmersolver/lib"
-          ##LIBRARY DESTINATION "share/elmersolver/lib")
-      ##ENDIF()
-    ##ELSE()
-      #INSTALL(TARGETS ${BASENAME} 
-        #LIBRARY DESTINATION "share/elmersolver/lib"
-        #RUNTIME DESTINATION "share/elmersolver/lib"
-        #ARCHIVE DESTINATION "share/elmersolver/lib")
-    ##ENDIF()
-  #ENDIF()
 ENDFOREACH()
 
-ADD_ELMER_MODULE(MagnetoDynamics DIRECTORY MagnetoDynamics) 
+# Turn module subdirs into modules
+FILE(GLOB SRC_DIRS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *)
+
+FOREACH(DIRNAME ${SRC_DIRS})
+  IF(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${DIRNAME}")
+    ADD_ELMER_MODULE(${DIRNAME} DIRECTORY ${DIRNAME}) 
+  ENDIF()
+ENDFOREACH()
 
 ADD_DEPENDENCIES(EliminatePeriodic EliminateDirichlet)
 ADD_DEPENDENCIES(FourierLoss MagnetoDynamics)
