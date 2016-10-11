@@ -48,22 +48,25 @@ SUBROUTINE SEOPLaser( Model,Solver,dt,TransientSimulation )
 
   IMPLICIT NONE
 !------------------------------------------------------------------------------
-  TYPE(Solver_t) :: Solver
+  TYPE(Solver_t) :: Solver !Solver and model data structs, I don't know what they do
   TYPE(Model_t) :: Model
-  REAL(KIND=dp) :: dt
-  LOGICAL :: TransientSimulation
+  REAL(KIND=dp) :: dt !Probably time delta definition
+  LOGICAL :: TransientSimulation !Yes/No Transient Simulation?
 !------------------------------------------------------------------------------
 ! Local variables
 !------------------------------------------------------------------------------
-  TYPE(Element_t),POINTER :: Element
+  TYPE(Element_t),POINTER :: Element !pointer to element struct, elements of mesh?
   REAL(KIND=dp) :: Norm
-  INTEGER :: n, nb, nd, t, active
-  INTEGER :: iter, maxiter
-  LOGICAL :: Found
+  INTEGER :: n, nb, nd, t, active !element counters?
+  INTEGER :: iter, maxiter !loop counters?
+  LOGICAL :: Found !Yes/No the guy is in the SIF
 !------------------------------------------------------------------------------
-
+  !ListGetInterger looks to be a function that retrieves information from the
+  !SIF, presumably only for integers
+  !GetSolverParams() looks to be a function that function that
   maxiter = ListGetInteger( GetSolverParams(),&
       'Nonlinear System Max Iterations',Found,minv=1)
+
   IF(.NOT. Found ) maxiter = 1
 
   ! Nonlinear iteration loop:
@@ -125,7 +128,7 @@ CONTAINS
                      spectral_overlap, laser_linewidth, frequency_shift,&
                      absorb_laser_ratio,rubidium_linewidth,laser_frequency,&
                      rubidium_frequency, laser_freq_width,&
-                     rubidium_freq_width, w, w_prime, beta
+                     rubidium_freq_width, w, w_prime
     LOGICAL :: Stat,Found
     INTEGER :: i,t,p,q,dim
     TYPE(GaussIntegrationPoints_t) :: IP
@@ -147,33 +150,8 @@ CONTAINS
     !Eventually some of this will all be passed from another solver
     Material => GetMaterial()
     nRb(1:n)=GetReal(Material,'rubidium number density',Found)
-    rubidium_wavelength = GetReal(Material,'rubidium wavelength',Found)
-    laser_wavelength = GetReal(Material,'laser wavelength',Found)
-    laser_linewidth = GetReal(Material,'laser line width',Found)
-    rubidium_linewidth = GetReal(Material,'rubidium linewidth',Found)
 
-    !Define spectral overlap function (eq. A7, A10 of Fink's paper)
-    rubidium_frequency = C/rubidium_wavelength
-    rubidium_freq_width = C*(1/(rubidium_wavelength-rubidium_linewidth/2) -&
-                        1/(rubidium_wavelength+rubidium_linewidth/2)
-
-    laser_frequency = C/laser_wavelength
-    laser_freq_width = C*(1/(laser_wavelength-laser_linewidth/2) -&
-                        1/(laser_wavelength+laser_linewidth/2))
-
-
-    absorb_laser_ratio = rubidium_freq_width/laser_freq_width
-    frequency_shift = 2*(laser_frequency - rubidium_frequency)/laser_freq_width
-
-    w = EXP(LOG(2)*(COMPLEX(absorb_laser_ratio,frequency_shift))**2&
-        )*ERFC(SQRT(LOG(2))*COMPLEX(absorb_laser_ratio,frequency_shift))
-
-    w_prime = REAL(w)
-
-    beta = 2*SQRT(PI*LOG(2))*(electron_radius*oscillator_strength*&
-            laser_wavelength**2*w_prime)/laser_linewidth
-
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Stopped Here 29.9.2016!!!!!!!!!!!!!
+    Beta(n) = BetaCalc() !Calculate Beta from (A6)
 
     ! Numerical integration:
     !-----------------------
