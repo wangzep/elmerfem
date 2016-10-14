@@ -42,178 +42,169 @@
 ! * as I figure out what I'm doing.
 !-------------------------------------------------------------------------------
 SUBROUTINE SEOPLaser( Model,Solver,dt,TransientSimulation )
-!------------------------------------------------------------------------------
-  !Use standard Elmer tools
-  USE DefUtils
+    !------------------------------------------------------------------------------
+    !Use standard Elmer tools
+    USE DefUtils
 
-  IMPLICIT NONE
-!------------------------------------------------------------------------------
-  TYPE(Solver_t) :: Solver !Solver and model data structs, I don't know what they do
-  TYPE(Model_t) :: Model
-  REAL(KIND=dp) :: dt !Probably time delta definition
-  LOGICAL :: TransientSimulation !Yes/No Transient Simulation?
-!------------------------------------------------------------------------------
-! Local variables
-!------------------------------------------------------------------------------
-  TYPE(Element_t),POINTER :: Element !pointer to element struct, elements of mesh?
-  REAL(KIND=dp) :: Norm
-  INTEGER :: n, nb, nd, t, active !element counters?
-  INTEGER :: iter, maxiter !loop counters?
-  LOGICAL :: Found !Yes/No the guy is in the SIF
-!------------------------------------------------------------------------------
-  !ListGetInterger looks to be a function that retrieves information from the
-  !SIF, presumably only for integers
-  !GetSolverParams() looks to be a function that function that
-  maxiter = ListGetInteger( GetSolverParams(),&
-      'Nonlinear System Max Iterations',Found,minv=1)
+    IMPLICIT NONE
+    !------------------------------------------------------------------------------
+    TYPE(Solver_t) :: Solver !Solver and model data structs, I don't know what they do
+    TYPE(Model_t) :: Model
+    REAL(KIND=dp) :: dt !Probably time delta definition
+    LOGICAL :: TransientSimulation !Yes/No Transient Simulation?
+    !------------------------------------------------------------------------------
+    ! Local variables
+    !------------------------------------------------------------------------------
+    TYPE(Element_t),POINTER :: Element !pointer to element struct, elements of mesh?
+    REAL(KIND=dp) :: Norm
+    INTEGER :: n, nb, nd, t, active !element counters?
+    INTEGER :: iter, maxiter !loop counters?
+    LOGICAL :: Found !Yes/No the guy is in the SIF
+    !------------------------------------------------------------------------------
+    !ListGetInterger looks to be a function that retrieves information from the
+    !SIF, presumably only for integers
+    !GetSolverParams() looks to be a function that function that
+    maxiter = ListGetInteger( GetSolverParams(),&
+        'Nonlinear System Max Iterations',Found,minv=1)
 
-  IF(.NOT. Found ) maxiter = 1
+    IF(.NOT. Found ) maxiter = 1
 
-  ! Nonlinear iteration loop:
-  !--------------------------
-  DO iter=1,maxiter
+    ! Nonlinear iteration loop:
+    !--------------------------
+    DO iter=1,maxiter
 
-    ! System assembly:
-    !----------------
-    CALL DefaultInitialize()
-    Active = GetNOFActive()
-    DO t=1,Active
-      Element => GetActiveElement(t)
-      n  = GetElementNOFNodes()
-      nd = GetElementNOFDOFs()
-      nb = GetElementNOFBDOFs()
-      CALL LocalMatrix(  Element, n, nd+nb )
+        ! System assembly:
+        !----------------
+        CALL DefaultInitialize()
+        Active = GetNOFActive()
+        DO t=1,Active
+            Element => GetActiveElement(t)
+            n  = GetElementNOFNodes()
+            nd = GetElementNOFDOFs()
+            nb = GetElementNOFBDOFs()
+            CALL LocalMatrix(  Element, n, nd+nb )
+        END DO
+
+        CALL DefaultFinishBulkAssembly()
+
+        Active = GetNOFBoundaryElements()
+        DO t=1,Active
+            Element => GetBoundaryElement(t)
+            IF(ActiveBoundaryElement()) THEN
+                n  = GetElementNOFNodes()
+                nd = GetElementNOFDOFs()
+                nb = GetElementNOFBDOFs()
+                CALL LocalMatrixBC(  Element, n, nd+nb )
+            END IF
+        END DO
+
+        CALL DefaultFinishBoundaryAssembly()
+        CALL DefaultFinishAssembly()
+        CALL DefaultDirichletBCs()
+
+        ! And finally, solve:
+        !--------------------
+        Norm = DefaultSolve()
+
+        IF( Solver % Variable % NonlinConverged == 1 ) EXIT
+
     END DO
-
-    CALL DefaultFinishBulkAssembly()
-
-    Active = GetNOFBoundaryElements()
-    DO t=1,Active
-      Element => GetBoundaryElement(t)
-      IF(ActiveBoundaryElement()) THEN
-        n  = GetElementNOFNodes()
-        nd = GetElementNOFDOFs()
-        nb = GetElementNOFBDOFs()
-        CALL LocalMatrixBC(  Element, n, nd+nb )
-      END IF
-    END DO
-
-    CALL DefaultFinishBoundaryAssembly()
-    CALL DefaultFinishAssembly()
-    CALL DefaultDirichletBCs()
-
-    ! And finally, solve:
-    !--------------------
-    Norm = DefaultSolve()
-
-    IF( Solver % Variable % NonlinConverged == 1 ) EXIT
-
-  END DO
 
 CONTAINS
 
-! Assembly of the matrix entries arising from the bulk elements
-!------------------------------------------------------------------------------
-  SUBROUTINE LocalMatrix( Element, n, nd )
-!------------------------------------------------------------------------------
-    INTEGER :: n, nd
-    TYPE(Element_t), POINTER :: Element
-!------------------------------------------------------------------------------
-    REAL(KIND=dp) :: C,PI
-    REAL(KIND=dp) :: nRb(n), Beta(n), &
-                     D,C,R, rho,Velo(3,n),a(3), Weight
-    REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
-    REAL(KIND=dp) :: STIFF(nd,nd)
-    REAL(KIND=dp) :: electron_radius, oscillator_strength, laser_wavelength, &
-                     spectral_overlap, laser_linewidth, frequency_shift,&
-                     absorb_laser_ratio,rubidium_linewidth,laser_frequency,&
-                     rubidium_frequency, laser_freq_width,&
-                     rubidium_freq_width, w, w_prime
-    LOGICAL :: Stat,Found
-    INTEGER :: i,t,p,q,dim
-    TYPE(GaussIntegrationPoints_t) :: IP
-    TYPE(ValueList_t), POINTER ::  Material
-    TYPE(Nodes_t) :: Nodes
-    SAVE Nodes
-!------------------------------------------------------------------------------
-    !Declare constants
-    C = 2.998e8
-    PI=4.D0*DATAN(1.D0)
+    ! Assembly of the matrix entries arising from the bulk elements
+    !------------------------------------------------------------------------------
+    SUBROUTINE LocalMatrix( Element, n, nd )
+        !------------------------------------------------------------------------------
+        INTEGER :: n, nd
+        TYPE(Element_t), POINTER :: Element
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: nRb(n), Beta(n), &
+            K, direction(3,n),N(3), Weight
+        REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
+        REAL(KIND=dp) :: STIFF(nd,nd), MASS(nd,nd), FORCE(nd,nd), LOAD(nd,nd)
 
-    dim = CoordinateSystemDimension()
+        LOGICAL :: Stat,Found
+        INTEGER :: i,t,p,q,dim
+        TYPE(GaussIntegrationPoints_t) :: IP
+        TYPE(ValueList_t), POINTER ::  Material
+        TYPE(Nodes_t) :: Nodes
+        SAVE Nodes
+        !------------------------------------------------------------------------------
 
-    CALL GetElementNodes( Nodes )
+        dim = CoordinateSystemDimension()
 
-    STIFF = 0._dp
+        CALL GetElementNodes( Nodes )
 
-    !Material Properties Def
-    !Eventually some of this will all be passed from another solver
-    Material => GetMaterial()
-    nRb(1:n)=GetReal(Material,'rubidium number density',Found)
+        STIFF = 0._dp
 
-    Beta(n) = BetaCalc() !Calculate Beta from (A6)
+        !Material Properties Def
+        !Eventually some of this will all be passed from another solver
+        Material => GetMaterial()
+        nRb(1:n)=GetReal(Material,'rubidium number density',Found)
 
-    ! Numerical integration:
-    !-----------------------
-    IP = GaussPoints( Element )
-    DO t=1,IP % n
-      ! Basis function values & derivatives at the integration point:
-      !--------------------------------------------------------------
-      stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), &
-              IP % W(t), detJ, Basis, dBasisdx )
-
-      ! The source term at the integration point:
-      !------------------------------------------
-
-
-      rho = SUM(Basis(1:n)*time_coeff(1:n))
-      a = MATMUL(Velo(:,1:n),Basis(1:n))
-      D = SUM(Basis(1:n)*diff_coeff(1:n))
-      C = SUM(Basis(1:n)*conv_coeff(1:n))
-      R = SUM(Basis(1:n)*react_coeff(1:n))
-
-      Weight = IP % s(t) * DetJ
-
-      ! diffusion term (D*grad(u),grad(v)):
-      ! -----------------------------------
-      STIFF(1:nd,1:nd) = STIFF(1:nd,1:nd) + Weight * &
-             D * MATMUL( dBasisdx, TRANSPOSE( dBasisdx ) )
-
-      DO p=1,nd
-        DO q=1,nd
-          ! advection term (C*grad(u),v)
-          ! -----------------------------------
-          STIFF (p,q) = STIFF(p,q) + Weight * &
-             C * SUM(a(1:dim)*dBasisdx(q,1:dim)) * Basis(p)
-
-          ! reaction term (R*u,v)
-          ! -----------------------------------
-          STIFF(p,q) = STIFF(p,q) + Weight * R*Basis(q) * Basis(p)
-
-          ! time derivative (rho*du/dt,v):
-          ! ------------------------------
-          MASS(p,q) = MASS(p,q) + Weight * rho * Basis(q) * Basis(p)
+        DO i =1,dim
+            direction(i,1:n)=GetReal(Material,&
+                'propogation direction'//TRIM(I2S(i)), Found)
         END DO
-      END DO
 
-      FORCE(1:nd) = FORCE(1:nd) + Weight * LoadAtIP * Basis(1:nd)
+        Beta(n) = BetaCalc(Model,n) !Calculate Beta from (A6), I have a feeling this isn't expressed correctly
+
+        ! Numerical integration:
+        !-----------------------
+        IP = GaussPoints( Element )
+        DO t=1,IP %
+        ! Basis function values & derivatives at the integration point:
+        !--------------------------------------------------------------
+        stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), &
+            IP % W(t), detJ, Basis, dBasisdx )
+
+        ! The source term at the integration point:
+        !------------------------------------------
+
+
+
+        N = MATMUL(direction(:,1:n),Basis(1:n))
+        K = SUM(Basis(1:n)*Beta(1:n)) !Need to write the full non-linear version of the code.
+
+        Weight = IP % s(t) * DetJ
+
+
+
+        DO p=1,nd
+            DO q=1,nd
+                ! Absorption Term (N*grad(u),grad(v)):
+                ! -----------------------------------
+
+                STIFF (p,q) = STIFF(p,q) + Weight * &
+                    * SUM(N(1:dim)*dBasisdx(q,1:dim)) * Basis(p)
+
+                ! Polarization Term (K*u,v)
+                ! -----------------------------------
+                STIFF(p,q) = STIFF(p,q) + Weight * K*Basis(q) * Basis(p)
+
+            END DO
+        END DO
+
+        FORCE(1:nd) = 0._dp
+        MASS(1:nd) = 0._dp
     END DO
 
     IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE)
     CALL LCondensate( nd-nb, nb, STIFF, FORCE )
     CALL DefaultUpdateEquations(STIFF,FORCE)
 !------------------------------------------------------------------------------
-  END SUBROUTINE LocalMatrix
+END SUBROUTINE LocalMatrix
 !------------------------------------------------------------------------------
 
 
 ! Assembly of the matrix entries arising from the Neumann and Robin conditions
 !------------------------------------------------------------------------------
-  SUBROUTINE LocalMatrixBC( Element, n, nd )
-!------------------------------------------------------------------------------
+SUBROUTINE LocalMatrixBC( Element, n, nd )
+    !------------------------------------------------------------------------------
     INTEGER :: n, nd
     TYPE(Element_t), POINTER :: Element
-!------------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     REAL(KIND=dp) :: Flux(n), Coeff(n), Ext_t(n), F,C,Ext, Weight
     REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
     REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd), LOAD(n)
@@ -225,7 +216,7 @@ CONTAINS
 
     TYPE(Nodes_t) :: Nodes
     SAVE Nodes
-!------------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     BC => GetBC()
     IF (.NOT.ASSOCIATED(BC) ) RETURN
 
@@ -244,46 +235,46 @@ CONTAINS
     !-----------------------
     IP = GaussPoints( Element )
     DO t=1,IP % n
-      ! Basis function values & derivatives at the integration point:
-      !--------------------------------------------------------------
-      stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), &
-              IP % W(t), detJ, Basis, dBasisdx )
+        ! Basis function values & derivatives at the integration point:
+        !--------------------------------------------------------------
+        stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), &
+            IP % W(t), detJ, Basis, dBasisdx )
 
-      Weight = IP % s(t) * DetJ
+        Weight = IP % s(t) * DetJ
 
-      ! Evaluate terms at the integration point:
-      !------------------------------------------
+        ! Evaluate terms at the integration point:
+        !------------------------------------------
 
-      ! Given flux:
-      ! -----------
-      F = SUM(Basis(1:n)*flux(1:n))
+        ! Given flux:
+        ! -----------
+        F = SUM(Basis(1:n)*flux(1:n))
 
-      ! Robin condition (C*(u-u_0)):
-      ! ---------------------------
-      C = SUM(Basis(1:n)*coeff(1:n))
-      Ext = SUM(Basis(1:n)*ext_t(1:n))
+        ! Robin condition (C*(u-u_0)):
+        ! ---------------------------
+        C = SUM(Basis(1:n)*coeff(1:n))
+        Ext = SUM(Basis(1:n)*ext_t(1:n))
 
-      DO p=1,nd
-        DO q=1,nd
-          STIFF(p,q) = STIFF(p,q) + Weight * C * Basis(q) * Basis(p)
+        DO p=1,nd
+            DO q=1,nd
+                STIFF(p,q) = STIFF(p,q) + Weight * C * Basis(q) * Basis(p)
+            END DO
         END DO
-      END DO
 
-      FORCE(1:nd) = FORCE(1:nd) + Weight * (F + C*Ext) * Basis(1:nd)
+        FORCE(1:nd) = FORCE(1:nd) + Weight * (F + C*Ext) * Basis(1:nd)
     END DO
     CALL DefaultUpdateEquations(STIFF,FORCE)
 !------------------------------------------------------------------------------
-  END SUBROUTINE LocalMatrixBC
+END SUBROUTINE LocalMatrixBC
 !------------------------------------------------------------------------------
 
 ! Perform static condensation in case bubble dofs are present
 !------------------------------------------------------------------------------
-  SUBROUTINE LCondensate( N, Nb, K, F )
-!------------------------------------------------------------------------------
+SUBROUTINE LCondensate( N, Nb, K, F )
+    !------------------------------------------------------------------------------
     USE LinearAlgebra
     INTEGER :: N, Nb
     REAL(KIND=dp) :: K(:,:),F(:),Kbb(Nb,Nb), &
-         Kbl(Nb,N), Klb(N,Nb), Fb(Nb)
+        Kbl(Nb,N), Klb(N,Nb), Fb(Nb)
 
     INTEGER :: m, i, j, l, p, Ldofs(N), Bdofs(Nb)
 
@@ -302,7 +293,7 @@ CONTAINS
     F(1:n) = F(1:n) - MATMUL( Klb, MATMUL( Kbb, Fb  ) )
     K(1:n,1:n) = K(1:n,1:n) - MATMUL( Klb, MATMUL( Kbb, Kbl ) )
 !------------------------------------------------------------------------------
-  END SUBROUTINE LCondensate
+END SUBROUTINE LCondensate
 !------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
