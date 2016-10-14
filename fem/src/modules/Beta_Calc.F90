@@ -9,7 +9,7 @@
 !This function will get the Rubidium parameters from the SIF file and return
 !the Beta parameter. It encodes equation (A7)-(A10) from Fink et al.
 
-FUNCTION BetaCalc(Model, n) RESULT(Beta(1:n))
+FUNCTION BetaCalc(Model, n) RESULT(Beta)
     IMPLICIT NONE
     USE DefUtils
     TYPE(Model_t) :: Model
@@ -22,7 +22,7 @@ FUNCTION BetaCalc(Model, n) RESULT(Beta(1:n))
         absorb_laser_ratio,laser_frequency,&
         rubidium_frequency, laser_freq_width,&
         rubidium_freq_width, rubidium_wavelength,w_prime, w_dprime,&
-        w_input_real,w_input_imaginary, Beta(1:n)
+        w_input_real,w_input_imaginary, Beta(n)
     LOGICAL :: FLAG, Found
     !------------------------------------------------------------------------!
     !Declare constants-------------------------------------------------------
