@@ -10,13 +10,13 @@
 !the Beta parameter. It encodes equation (A7)-(A10) from Fink et al.
 
 FUNCTION BetaCalc(Model, n) RESULT(Beta)
-    IMPLICIT NONE
     USE DefUtils
+    IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
 
     !------------------------------------------------------------------------!
-    REAL(KIND=dp) :: X, C, PI, LOG2
+    REAL(KIND=dp) :: TWO, C, LOG2
     REAL(KIND=dp) :: electron_radius, oscillator_strength, laser_wavelength, &
         laser_linewidth, frequency_shift,&
         absorb_laser_ratio,laser_frequency,&
@@ -26,22 +26,21 @@ FUNCTION BetaCalc(Model, n) RESULT(Beta)
     LOGICAL :: FLAG, Found
     !------------------------------------------------------------------------!
     !Declare constants-------------------------------------------------------
-    PARAMETER(X = 2.0D0,&
-        C = 299792458.0D0,&
-        PI=4.0D0*ATAN(1.0D0),&
-        LOG2 = LOG(X),&
-        electron_radius = 2.8179403267e-15)
+        TWO = 2.0D0
+        C = 299792458.0D0
+        LOG2 = LOG(TWO)
+        electron_radius = 2.8179403267e-15
     !-------------------------------------------------------------------------
 
     !Get the material information about the rubidium and the laser from the SIF
     !file---------------------------------------------------------------------
-    Material => GetMaterial()
+    !Material => GetMaterial()
 
-    rubidium_wavelength = GetReal(Material,'rubidium wavelength',Found)
-    laser_wavelength = GetReal(Material,'laser wavelength',Found)
-    laser_linewidth = GetReal(Material,'laser line width',Found)
-    rubidium_linewidth = GetReal(Material,'rubidium linewidth',Found)
-    oscillator_strength = GetReal(Material,'oscillator strength', Found)
+    rubidium_wavelength = GetConstReal(Model % Constants,'rubidium wavelength',Found)
+    laser_wavelength = GetConstReal(Model % Constants,'laser wavelength',Found)
+    laser_linewidth = GetConstReal(Model % Constants,'laser line width',Found)
+    rubidium_freq_width = GetConstReal(Model % Constants,'rubidium frequency width',Found)
+    oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
 
         !For testing---------------------------------!!!!!!!!!!!!!!!!!!!!!!!
     !rubidium_wavelength = 800e-9
@@ -150,7 +149,7 @@ SUBROUTINE WOFZ (XI, YI, U, V, FLAG)
     !
 
 
-
+    USE DefUtils
 
     IMPLICIT REAL(KIND=dp) (A-H, O-Z)
 
