@@ -32,9 +32,9 @@ FUNCTION BetaCalc(Model, n) RESULT(Beta)
         electron_radius = 2.8179403267e-15
     !-------------------------------------------------------------------------
 
-    !Get the material information about the rubidium and the laser from the SIF
+    !Get the information about the rubidium and the laser from the SIF
     !file---------------------------------------------------------------------
-    !Material => GetMaterial()
+
 
     rubidium_wavelength = GetConstReal(Model % Constants,'rubidium wavelength',Found)
     laser_wavelength = GetConstReal(Model % Constants,'laser wavelength',Found)
