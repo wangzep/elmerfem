@@ -24,7 +24,7 @@
 !******************************************************************************
 ! *
 ! *  Authors: Geoffry Schrank
-! *  Email:   geoffry.schrank@duke.edu
+! *  Email:   drgeoffschrank@gmail.com
 ! *  Web:     NA
 ! *  Address: 311 Research Drive
 ! *           Durham, NC
@@ -50,6 +50,8 @@ SUBROUTINE SEOPLaser( Model,Solver,dt,TransientSimulation )
     !------------------------------------------------------------------------------
     TYPE(Solver_t) :: Solver !Solver and model data structs, I don't know what they do
     TYPE(Model_t) :: Model
+    TYPE(Mesh_t), POINTER :: Mesh
+    TYPE(Matrix_t), POINTER :: Matrix
     REAL(KIND=dp) :: dt !Probably time delta definition
     LOGICAL :: TransientSimulation !Yes/No Transient Simulation?
     !------------------------------------------------------------------------------
@@ -60,7 +62,30 @@ SUBROUTINE SEOPLaser( Model,Solver,dt,TransientSimulation )
     INTEGER :: n, nb, nd, t, active !element counters?
     INTEGER :: iter, maxiter !loop counters?
     LOGICAL :: Found !Yes/No the guy is in the SIF
-    !------------------------------------------------------------------------------
+    LOGICAL :: AllocationsDone = .FALSE.
+    REAL(KIND = dp), ALLOCATABLE :: STIFF (:,:), FORCE(:)
+        !------------------------------------------------------------------------------
+
+    SAVE STIFF, FORCE, AllocationsDone
+
+    PRINT *,'This is LaserSEOP Solver. I have started.'
+    !N = Solver % Matrix % NumberofRows
+    !PRINT *, 'number of rows', N
+
+    !IF (.NOT. AllocationsDone) THEN
+     !   Active = GetNOFActive()
+
+      !          PRINT *,'Got to here'
+
+
+        !Mesh => Solver % Mesh
+        !N = Mesh % MaxElementNodes
+
+       ! ALLOCATE(STIFF(Active,Active))
+        !ALLOCATE(FORCE(Active))
+
+    !END IF
+
     !ListGetInterger looks to be a function that retrieves information from the
     !SIF, presumably only for integers
     !GetSolverParams() looks to be a function that function that
@@ -72,7 +97,6 @@ SUBROUTINE SEOPLaser( Model,Solver,dt,TransientSimulation )
     ! Nonlinear iteration loop:
     !--------------------------
     DO iter=1,maxiter
-
         ! System assembly:
         !----------------
         CALL DefaultInitialize()
@@ -94,7 +118,7 @@ SUBROUTINE SEOPLaser( Model,Solver,dt,TransientSimulation )
                 n  = GetElementNOFNodes()
                 nd = GetElementNOFDOFs()
                 nb = GetElementNOFBDOFs()
-                CALL LocalMatrixBC(  Element, n, nd+nb )
+                CALL LocalMatrixBC(  Element, n, nd+nb, Model )
             END IF
         END DO
 
@@ -153,7 +177,7 @@ CONTAINS
         !    direction(i,1:n)=GetReal(Material,&
         !        'propogation direction'//TRIM(I2S(i)), Found)
         !END DO
-        CALL GetConstRealArray(Solver % Values, direction, 'laser direction',Found)
+        CALL GetConstRealArray(Material, direction, 'laser direction',Found)
         IF(.NOT.Found) CALL Fatal('SEOPLaser','Unable to find laser direction')
 
         Beta(1:n) = BetaCalc(Model,n) !Calculate Beta from (A6), I have a feeling this isn't expressed correctly
@@ -184,7 +208,7 @@ CONTAINS
                     ! -----------------------------------
 
                     STIFF (p,q) = STIFF(p,q) + Weight * &
-                         SUM(direction(1:dim,1)*dBasisdx(q,1:dim)) * Basis(p)
+                        SUM(direction(1:dim,1)*dBasisdx(q,1:dim)) * Basis(p)
 
                     ! Polarization Term (K*u,v)
                     ! -----------------------------------
@@ -208,12 +232,13 @@ CONTAINS
 
     ! Assembly of the matrix entries arising from the Neumann and Robin conditions
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrixBC( Element, n, nd )
+    SUBROUTINE LocalMatrixBC( Element, n, nd , Model)
         !------------------------------------------------------------------------------
         INTEGER :: n, nd
         TYPE(Element_t), POINTER :: Element
+        TYPE(Model_t) :: Model
         !------------------------------------------------------------------------------
-        REAL(KIND=dp) :: Flux(n), Coeff(n), Ext_t(n), F,C,Ext, Weight
+        REAL(KIND=dp) :: Power, Area, F, Weight, Beta(n), Flux(n)
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
         REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd), LOAD(n)
         LOGICAL :: Stat,Found
@@ -235,9 +260,12 @@ CONTAINS
         FORCE = 0._dp
         LOAD = 0._dp
 
-        Flux(1:n)  = GetReal( BC,'field flux', Found )
-        Coeff(1:n) = GetReal( BC,'robin coefficient', Found )
-        Ext_t(1:n) = GetReal( BC,'external field', Found )
+        Power  = GetConstReal( BC,'laser power', Found )
+        Area = GetConstReal( BC,'laser area', Found )
+
+        Beta(1:n) = BetaCalc(Model,n) !Calculate Beta from (A6), I have a feeling this isn't expressed correctly
+
+        Flux (1:n) = Power/Area*Beta(1:n)
 
         ! Numerical integration:
         !-----------------------
@@ -257,18 +285,14 @@ CONTAINS
             ! -----------
             F = SUM(Basis(1:n)*flux(1:n))
 
-            ! Robin condition (C*(u-u_0)):
-            ! ---------------------------
-            C = SUM(Basis(1:n)*coeff(1:n))
-            Ext = SUM(Basis(1:n)*ext_t(1:n))
-
+            !I'm not sure if I can get rid of the construction of the STIFF matrix
             DO p=1,nd
                 DO q=1,nd
-                    STIFF(p,q) = STIFF(p,q) + Weight * C * Basis(q) * Basis(p)
+                    STIFF(p,q) = STIFF(p,q)
                 END DO
             END DO
 
-            FORCE(1:nd) = FORCE(1:nd) + Weight * (F + C*Ext) * Basis(1:nd)
+            FORCE(1:nd) = FORCE(1:nd) + Weight * F * Basis(1:nd)
         END DO
         CALL DefaultUpdateEquations(STIFF,FORCE)
     !------------------------------------------------------------------------------
