@@ -78,11 +78,11 @@ CONTAINS
         TYPE(Element_t), POINTER :: Element
         !------------------------------------------------------------------------------
         REAL(KIND=dp) :: Beta, Absorption_Term(n), nRb(n), spin_destruction(n), &
-            D,C,R, direction(3,n),a(3), Weight
+            D,C,R, direction(3,n),a(3), Weight, SOL(n), RbPol_Term(n),one
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
         LOGICAL :: Stat,Found
-        INTEGER :: i,t,p,q,dim
+        INTEGER :: i,t,p,q,dim, dimen
         TYPE(GaussIntegrationPoints_t) :: IP
         TYPE(ValueList_t), POINTER :: BodyForce, Material
         TYPE(Nodes_t) :: Nodes
@@ -91,11 +91,13 @@ CONTAINS
 
         dim = CoordinateSystemDimension()
 
+        CALL GetScalarLocalSolution(SOL,UElement=Element)
         CALL GetElementNodes( Nodes )
+
         MASS  = 0._dp
         STIFF = 0._dp
         FORCE = 0._dp
-
+        RbPol_Term = 0._dp
 
         Material => GetMaterial()
         nRb(1:n)=GetReal(Material,'rubidium number density',Found)
@@ -103,7 +105,23 @@ CONTAINS
 
         Beta = BetaCalc(Model,n)
 
-        Absorption_Term = Beta*nRb
+        !Absorption_Term = Beta*nRb
+        Absorption_Term = nRb !This is just to make testing easier. Switch back to the above term when I'm done.
+
+        dimen = SIZE(Absorption_Term)
+
+        DO i=1,dimen
+            RbPol_Term(i) = (1.)-(SOL(i)/(SOL(i)+spin_destruction(i)))
+        END DO
+
+        DO i=1,dimen
+            Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
+        END DO
+
+        !For Testing
+        !IF (Element % ElementIndex == 5000) PRINT *,'RbPolTerm',RbPol_Term
+        !IF (Element % ElementIndex == 5000) PRINT *,'SOL',SOL
+        !IF (Element % ElementIndex == 5000) PRINT *,'spin destruction',spin_destruction
 
         direction = 0._dp
 
@@ -144,7 +162,6 @@ CONTAINS
 
                 END DO
             END DO
-
         END DO
 
         IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE)
