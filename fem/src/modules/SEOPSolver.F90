@@ -21,11 +21,40 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
     INTEGER :: n, nb, nd, t, active
     INTEGER :: iter, maxiter
     LOGICAL :: Found
+
+    !Laser Configuration Variables------------------------------------------
+    REAL(KIND=dp) ::rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
+        laser_linewidth,oscillator_strength,Beta
+
+
+    rubidium_wavelength = GetConstReal(Model % Constants,'rubidium wavelength',Found)
+    laser_wavelength = GetConstReal(Model % Constants,'laser wavelength',Found)
+    laser_linewidth = GetConstReal(Model % Constants,'laser line width',Found)
+    rubidium_freq_width = GetConstReal(Model % Constants,'rubidium frequency width',Found)
+    oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
     !------------------------------------------------------------------------------
-  
+
+    !-------------For Testing--------------------------------------
+    !rubidium_wavelength = 794.7e-9
+    !rubidium_freq_width = 126.65e9
+
+    !laser_wavelength = 795e-9
+    !laser_linewidth = 2e-9
+
+    !oscillator_strength = 1.0/3.0
+    !----------------------------------------------------------------
+
     maxiter = ListGetInteger( GetSolverParams(),&
         'Nonlinear System Max Iterations',Found,minv=1)
     IF(.NOT. Found ) maxiter = 1
+
+    !Calculate Beta for the this laser configuration----------------
+
+
+
+    Beta = BetaCalc(rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
+        laser_linewidth,oscillator_strength)
+    !----------------------------------------------------------------------
 
     ! Nonlinear iteration loop:
     !--------------------------
@@ -40,7 +69,7 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
             n  = GetElementNOFNodes()
             nd = GetElementNOFDOFs()
             nb = GetElementNOFBDOFs()
-            CALL LocalMatrix(  Element, n, nd+nb )
+            CALL LocalMatrix(  Element, n, nd+nb, Beta )
         END DO
 
         CALL DefaultFinishBulkAssembly()
@@ -72,7 +101,7 @@ CONTAINS
 
     ! Assembly of the matrix entries arising from the bulk elements
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrix( Element, n, nd )
+    SUBROUTINE LocalMatrix( Element, n, nd , Beta)
         !------------------------------------------------------------------------------
         INTEGER :: n, nd
         TYPE(Element_t), POINTER :: Element
@@ -80,6 +109,7 @@ CONTAINS
         REAL(KIND=dp) :: Beta, Absorption_Term(n), nRb(n), spin_destruction(n), &
             D,C,R, direction(3,n),a(3), Weight, SOL(n), RbPol_Term(n),one
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
+        !REAL(KIND=dp) :: rubidium_wavelength
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
         LOGICAL :: Stat,Found
         INTEGER :: i,t,p,q,dim, dimen
@@ -98,15 +128,16 @@ CONTAINS
         STIFF = 0._dp
         FORCE = 0._dp
         RbPol_Term = 0._dp
+        Absorption_Term = 0._dp
+
 
         Material => GetMaterial()
         nRb(1:n)=GetReal(Material,'rubidium number density',Found)
         spin_destruction(1:n) = GetReal(Material,'spin destruction rate',Found)
 
-        Beta = BetaCalc(Model,n)
+        Absorption_Term = Beta*nRb
 
-        !Absorption_Term = Beta*nRb
-        Absorption_Term = nRb !This is just to make testing easier. Switch back to the above term when I'm done.
+        !Absorption_Term = nRb !This is just to make testing easier. Switch back to the above term when I'm done.
 
         dimen = SIZE(Absorption_Term)
 
@@ -117,11 +148,6 @@ CONTAINS
         DO i=1,dimen
             Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
         END DO
-
-        !For Testing
-        !IF (Element % ElementIndex == 5000) PRINT *,'RbPolTerm',RbPol_Term
-        !IF (Element % ElementIndex == 5000) PRINT *,'SOL',SOL
-        !IF (Element % ElementIndex == 5000) PRINT *,'spin destruction',spin_destruction
 
         direction = 0._dp
 
@@ -182,7 +208,7 @@ CONTAINS
         TYPE(Element_t), POINTER :: Element
         !------------------------------------------------------------------------------
         REAL(KIND=dp) :: Weight
-        REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
+        REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
         REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd)
         LOGICAL :: Stat,Found
         INTEGER :: i,t,p,q,dim
@@ -202,6 +228,7 @@ CONTAINS
         STIFF = 0._dp
         FORCE = 0._dp
 
+        IP = GaussPoints( Element )
 
         CALL DefaultUpdateEquations(STIFF,FORCE)
     !------------------------------------------------------------------------------
@@ -237,11 +264,10 @@ CONTAINS
     END SUBROUTINE LCondensate
     !------------------------------------------------------------------------------
 
-    FUNCTION BetaCalc(Model, n) RESULT(Beta)
+    FUNCTION BetaCalc(rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
+        laser_linewidth,oscillator_strength) RESULT (Beta)
         USE DefUtils
         IMPLICIT NONE
-        TYPE(Model_t) :: Model
-        INTEGER :: n
 
         !------------------------------------------------------------------------!
         REAL(KIND=dp) :: TWO, C, LOG2
@@ -259,26 +285,6 @@ CONTAINS
         LOG2 = LOG(TWO)
         electron_radius = 2.8179403267e-15
         !-------------------------------------------------------------------------
-
-        !Get the information about the rubidium and the laser from the SIF
-        !file---------------------------------------------------------------------
-
-
-        !rubidium_wavelength = GetConstReal(Model % Constants,'rubidium wavelength',Found)
-        !laser_wavelength = GetConstReal(Model % Constants,'laser wavelength',Found)
-        !laser_linewidth = GetConstReal(Model % Constants,'laser line width',Found)
-        !rubidium_freq_width = GetConstReal(Model % Constants,'rubidium frequency width',Found)
-        !oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
-
-            !For testing---------------------------------!!!!!!!!!!!!!!!!!!!!!!!
-        rubidium_wavelength = 800e-9
-        rubidium_freq_width = 126.65e9
-
-        laser_wavelength = 800e-9
-        laser_linewidth = 2e-9
-
-        oscillator_strength = 1.0/3.0
-
 
         !-------------------------------------------------------------------------
 
@@ -308,14 +314,8 @@ CONTAINS
 
         CALL WOFZ(w_input_real,w_input_imaginary,w_prime,w_dprime,FLAG)
 
-        !print *,'wprime',w_prime
-
         Beta = 2*DSQRT(PI*LOG2)*(electron_radius*oscillator_strength*&
             laser_wavelength**2*w_prime)/laser_linewidth
-
-        !PRINT *,'The first Beta', Beta
-
-        RETURN
 
     END FUNCTION
 
