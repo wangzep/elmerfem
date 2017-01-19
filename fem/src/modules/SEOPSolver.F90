@@ -17,7 +17,10 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
     ! Local variables
     !------------------------------------------------------------------------------
     TYPE(Element_t),POINTER :: Element
-    REAL(KIND=dp) :: Norm
+    TYPE(Mesh_t), POINTER :: Mesh
+    REAL(KIND=dp), POINTER :: FluxTotal(:)
+    REAL(KIND=dp) :: Norm, NonlinearRelax
+    REAL(KIND=dp), ALLOCATABLE:: Flux(:),PFluxTotal(:)
     INTEGER :: n, nb, nd, t, active
     INTEGER :: iter, maxiter
     LOGICAL :: Found
@@ -33,6 +36,26 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
     rubidium_freq_width = GetConstReal(Model % Constants,'rubidium frequency width',Found)
     oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
     !------------------------------------------------------------------------------
+
+    !Non-Linear Solver Parameters--------------------------------------------------
+
+    NonlinearRelax = GetConstReal( Solver % Values, &
+        'Nonlinear System Relaxation Factor', Found )
+
+     IF (.NOT. Found) NonlinearRelax = 1.0d0
+
+     IF (NonlinearRelax /= 1.0d0) THEN
+
+        FluxTotal => Solver % Variable % Values
+        ALLOCATE(PFluxTotal(Size(FluxTotal))) !So we know how big to make it later on
+
+     END IF
+
+
+    !-------Setup for the linearization of the photon flux
+    Mesh => GetMesh()
+    N = 2 * MAX(Mesh % MaxElementDOFs, Mesh % MaxElementNodes )
+    ALLOCATE(Flux(N))
 
     !-------------For Testing--------------------------------------
     !rubidium_wavelength = 794.7e-9
@@ -50,11 +73,9 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
 
     !Calculate Beta for the this laser configuration----------------
 
-
-
     Beta = BetaCalc(rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
         laser_linewidth,oscillator_strength)
-    !----------------------------------------------------------------------
+    !----------------------------------------------------------------
 
     ! Nonlinear iteration loop:
     !--------------------------
@@ -68,8 +89,11 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
             Element => GetActiveElement(t)
             n  = GetElementNOFNodes()
             nd = GetElementNOFDOFs()
-            nb = GetElementNOFBDOFs()
-            CALL LocalMatrix(  Element, n, nd+nb, Beta )
+            !nb = GetElementNOFBDOFs()
+
+            CALL GetScalarLocalSolution(Flux)
+
+            CALL LocalMatrix(  Element, n, nd, Flux, Beta )
         END DO
 
         CALL DefaultFinishBulkAssembly()
@@ -85,13 +109,31 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
             END IF
         END DO
 
+        !---------------------------------------------------------
+
         CALL DefaultFinishBoundaryAssembly()
         CALL DefaultFinishAssembly()
         CALL DefaultDirichletBCs()
 
+        !Remember solution for relaxation, if we have a relaxation factor
+
+        IF (NonlinearRelax /= 1.0d0) PFluxTotal = FluxTotal
+
+
         ! And finally, solve:
         !--------------------
+
         Norm = DefaultSolve()
+
+        !----Relaxation-------------------------------------------
+        IF (NonlinearRelax /= 1.0d0) THEN
+
+            FluxTotal = (1-NonlinearRelax)*PFluxTotal + &
+                    NonlinearRelax*FluxTotal
+
+            CALL ComputeChange( Solver, .FALSE., n, FluxTotal, PFluxTotal )
+
+        END IF
 
         IF( Solver % Variable % NonlinConverged == 1 ) EXIT
 
@@ -101,13 +143,13 @@ CONTAINS
 
     ! Assembly of the matrix entries arising from the bulk elements
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrix( Element, n, nd , Beta)
+    SUBROUTINE LocalMatrix( Element, n, nd , Flux, Beta)
         !------------------------------------------------------------------------------
         INTEGER :: n, nd
         TYPE(Element_t), POINTER :: Element
         !------------------------------------------------------------------------------
         REAL(KIND=dp) :: Beta, Absorption_Term(n), nRb(n), spin_destruction(n), &
-            D,C,R, direction(3,n),a(3), Weight, SOL(n), RbPol_Term(n),one
+            D,C,R, direction(3,n),a(3), Weight, Flux(:), RbPol_Term(n),one
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
         !REAL(KIND=dp) :: rubidium_wavelength
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
@@ -121,7 +163,7 @@ CONTAINS
 
         dim = CoordinateSystemDimension()
 
-        CALL GetScalarLocalSolution(SOL,UElement=Element)
+        !CALL GetScalarLocalSolution(SOL,UElement=Element)
         CALL GetElementNodes( Nodes )
 
         MASS  = 0._dp
@@ -135,20 +177,28 @@ CONTAINS
         nRb(1:n)=GetReal(Material,'rubidium number density',Found)
         spin_destruction(1:n) = GetReal(Material,'spin destruction rate',Found)
 
-        Absorption_Term = Beta*nRb
+        Absorption_Term(1:n) = Beta*nRb(1:n)
+
+        DO i = 1,n
+            IF(Flux(i)<0) Flux(i) = 0 !To prevent non-physical values of the photon flux
+            RbPol_Term(i) = (1.)-(Flux(i)/(Flux(i)+spin_destruction(i)))
+            Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
+        END DO
+        !----------------------------------------------------------------------------------------------------------
+        !Absorption_Term = Beta*nRb
 
         !Absorption_Term = nRb !This is just to make testing easier. Switch back to the above term when I'm done.
 
-        dimen = SIZE(Absorption_Term)
+        !dimen = SIZE(Absorption_Term)
 
-        DO i=1,dimen
-            RbPol_Term(i) = (1.)-(SOL(i)/(SOL(i)+spin_destruction(i)))
-        END DO
+        !DO i=1,dimen
+        !    RbPol_Term(i) = (1.)-(SOL(i)/(SOL(i)+spin_destruction(i)))
+        !END DO
 
-        DO i=1,dimen
-            Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
-        END DO
-
+        !DO i=1,dimen
+        !    Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
+        !END DO
+        !-----------------------------------------------------------------------------------------------------------
         direction = 0._dp
 
         DO i=1,dim
