@@ -34,16 +34,6 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
     oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
     !------------------------------------------------------------------------------
 
-    !-------------For Testing--------------------------------------
-    !rubidium_wavelength = 794.7e-9
-    !rubidium_freq_width = 126.65e9
-
-    !laser_wavelength = 795e-9
-    !laser_linewidth = 2e-9
-
-    !oscillator_strength = 1.0/3.0
-    !----------------------------------------------------------------
-
     maxiter = ListGetInteger( GetSolverParams(),&
         'Nonlinear System Max Iterations',Found,minv=1)
     IF(.NOT. Found ) maxiter = 1
@@ -63,13 +53,17 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
         ! System assembly:
         !----------------
         CALL DefaultInitialize()
+
         Active = GetNOFActive()
+
         DO t=1,Active
             Element => GetActiveElement(t)
             n  = GetElementNOFNodes()
             nd = GetElementNOFDOFs()
             nb = GetElementNOFBDOFs()
-            CALL LocalMatrix(  Element, n, nd+nb, Beta )
+
+            CALL LocalMatrix(  Element, n, nd + nb, Beta )
+
         END DO
 
         CALL DefaultFinishBulkAssembly()
@@ -107,12 +101,12 @@ CONTAINS
         TYPE(Element_t), POINTER :: Element
         !------------------------------------------------------------------------------
         REAL(KIND=dp) :: Beta, Absorption_Term(n), nRb(n), spin_destruction(n), &
-            D,C,R, direction(3,n),a(3), Weight, SOL(n), RbPol_Term(n),one
+            D,C,R, direction(3,n),a(3), Weight, Flux(n), RbPol_Term(n),one
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
         !REAL(KIND=dp) :: rubidium_wavelength
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
         LOGICAL :: Stat,Found
-        INTEGER :: i,t,p,q,dim, dimen
+        INTEGER :: i,t,p,q,dim
         TYPE(GaussIntegrationPoints_t) :: IP
         TYPE(ValueList_t), POINTER :: BodyForce, Material
         TYPE(Nodes_t) :: Nodes
@@ -121,7 +115,7 @@ CONTAINS
 
         dim = CoordinateSystemDimension()
 
-        CALL GetScalarLocalSolution(SOL,UElement=Element)
+        CALL GetScalarLocalSolution(Flux)
         CALL GetElementNodes( Nodes )
 
         MASS  = 0._dp
@@ -139,13 +133,9 @@ CONTAINS
 
         !Absorption_Term = nRb !This is just to make testing easier. Switch back to the above term when I'm done.
 
-        dimen = SIZE(Absorption_Term)
-
-        DO i=1,dimen
-            RbPol_Term(i) = (1.)-(SOL(i)/(SOL(i)+spin_destruction(i)))
-        END DO
-
-        DO i=1,dimen
+        DO i=1,n
+            IF(Flux(i)<0) Flux(i) = 0 !This prevents non-phyical values of photon flux being used to make this calculation
+            RbPol_Term(i) = (1.)-(Flux(i)/(Flux(i)+spin_destruction(i)))
             Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
         END DO
 
