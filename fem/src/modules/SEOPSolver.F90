@@ -20,7 +20,7 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
     TYPE(Mesh_t), POINTER :: Mesh
     REAL(KIND=dp), POINTER :: FluxTotal(:)
     REAL(KIND=dp) :: Norm, NonlinearRelax
-    REAL(KIND=dp), ALLOCATABLE:: Flux(:),PFluxTotal(:)
+    REAL(KIND=dp), ALLOCATABLE:: PFluxTotal(:)
     INTEGER :: n, nb, nd, t, active
     INTEGER :: iter, maxiter
     LOGICAL :: Found
@@ -53,9 +53,9 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
 
 
     !-------Setup for the linearization of the photon flux
-    Mesh => GetMesh()
-    N = 2 * MAX(Mesh % MaxElementDOFs, Mesh % MaxElementNodes )
-    ALLOCATE(Flux(N))
+    !Mesh => GetMesh()
+    !N = 2 * MAX(Mesh % MaxElementDOFs, Mesh % MaxElementNodes )
+    !ALLOCATE(Flux(N))
 
     !-------------For Testing--------------------------------------
     !rubidium_wavelength = 794.7e-9
@@ -89,11 +89,10 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
             Element => GetActiveElement(t)
             n  = GetElementNOFNodes()
             nd = GetElementNOFDOFs()
-            !nb = GetElementNOFBDOFs()
+            nb = GetElementNOFBDOFs()
 
-            CALL GetScalarLocalSolution(Flux)
 
-            CALL LocalMatrix(  Element, n, nd, Flux, Beta )
+            CALL LocalMatrix(  Element, n, nd + nb, Beta )
         END DO
 
         CALL DefaultFinishBulkAssembly()
@@ -143,13 +142,13 @@ CONTAINS
 
     ! Assembly of the matrix entries arising from the bulk elements
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrix( Element, n, nd , Flux, Beta)
+    SUBROUTINE LocalMatrix( Element, n, nd , Beta)
         !------------------------------------------------------------------------------
         INTEGER :: n, nd
         TYPE(Element_t), POINTER :: Element
         !------------------------------------------------------------------------------
         REAL(KIND=dp) :: Beta, Absorption_Term(n), nRb(n), spin_destruction(n), &
-            D,C,R, direction(3,n),a(3), Weight, Flux(:), RbPol_Term(n),one
+            D,C,R, direction(3,n),a(3), Weight, Flux(n), RbPol_Term(n),one
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
         !REAL(KIND=dp) :: rubidium_wavelength
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
@@ -165,6 +164,7 @@ CONTAINS
 
         !CALL GetScalarLocalSolution(SOL,UElement=Element)
         CALL GetElementNodes( Nodes )
+        CALL GetScalarLocalSolution(Flux)
 
         MASS  = 0._dp
         STIFF = 0._dp
