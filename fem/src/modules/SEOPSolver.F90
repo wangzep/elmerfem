@@ -85,7 +85,9 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
         ! System assembly:
         !----------------
         CALL DefaultInitialize()
+
         Active = GetNOFActive()
+
         DO t=1,Active
             Element => GetActiveElement(t)
             n  = GetElementNOFNodes()
@@ -154,7 +156,7 @@ CONTAINS
         !REAL(KIND=dp) :: rubidium_wavelength
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
         LOGICAL :: Stat,Found
-        INTEGER :: i,t,p,q,dim, dimen
+        INTEGER :: i,t,p,q,dim
         TYPE(GaussIntegrationPoints_t) :: IP
         TYPE(ValueList_t), POINTER :: BodyForce, Material
         TYPE(Nodes_t) :: Nodes
