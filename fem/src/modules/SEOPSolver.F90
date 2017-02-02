@@ -75,6 +75,7 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
 
     Beta = BetaCalc(rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
         laser_linewidth,oscillator_strength)
+    !PRINT *,"Beta",Beta
     !----------------------------------------------------------------
 
     ! Nonlinear iteration loop:
@@ -179,25 +180,13 @@ CONTAINS
 
         Absorption_Term(1:n) = Beta*nRb(1:n)
 
+        !---------------------Non-linear Term---------------------------------------------------------
         DO i = 1,n
             IF(Flux(i)<0) Flux(i) = 0 !To prevent non-physical values of the photon flux
             RbPol_Term(i) = (1.)-(Flux(i)/(Flux(i)+spin_destruction(i)))
             Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
         END DO
-        !----------------------------------------------------------------------------------------------------------
-        !Absorption_Term = Beta*nRb
 
-        !Absorption_Term = nRb !This is just to make testing easier. Switch back to the above term when I'm done.
-
-        !dimen = SIZE(Absorption_Term)
-
-        !DO i=1,dimen
-        !    RbPol_Term(i) = (1.)-(SOL(i)/(SOL(i)+spin_destruction(i)))
-        !END DO
-
-        !DO i=1,dimen
-        !    Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
-        !END DO
         !-----------------------------------------------------------------------------------------------------------
         direction = 0._dp
 
