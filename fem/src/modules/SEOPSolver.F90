@@ -256,8 +256,8 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,Transient )
             !------------------------------------------------------------------------------
             LOAD(1:n) = GetReal( BodyForce, TRIM(VariableName) // ' Source', Found )
             IF (.NOT.Found) THEN
-                WRITE(Message,'(A,A,A)') 'Body Force >',TRIM(VariableName) // ' Source','< not found'
-                CALL INFO(SolverName, Message, Level=42)
+                !WRITE(Message,'(A,A,A)') 'Body Force >',TRIM(VariableName) // ' Source','< not found'
+                !CALL INFO(SolverName, Message, Level=42)
                 LOAD(1:n)  = 0.0d0
             END IF
             !------------------------------------------------------------------------------
@@ -274,7 +274,7 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,Transient )
             Absorption_Term(1:n) = Beta*nRb(1:n)
 
             !-----------------------Get the Local Solution for the Non-Linear Term----------
-            GetLocalScalarSolution(Flux)
+            CALL GetScalarLocalSolution(Flux)
 
             !---------------------Non-linear Term---------------------------------------------------------
             DO i = 1,n
@@ -776,9 +776,9 @@ CONTAINS
         !------------------------------------------------------------------------------
         n  = GetElementNOFNodes( Element )
         ConvectionFlag = GetString( Equation, 'Convection', Found )
-        IF (.NOT. Found) &
-            CALL FATAL(SolverName, 'No string for keyword >Convection< found in Equation')
-        Velo = 0.0d00
+        !IF (.NOT. Found) &
+        !    CALL FATAL(SolverName, 'No string for keyword >Convection< found in Equation')
+        !Velo = 0.0d00
         !Get the laser direction. I've commented out all the computed velocity stuff because
         !I don't need it.
         !---------------------------------------------------
