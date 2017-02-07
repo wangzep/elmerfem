@@ -1,309 +1,854 @@
-!-----------------------------------------------------------------------------
-!> A prototype solver for advection-diffusion-reaction equation,
-!> This equation is generic and intended for education purposes
-!> but may also serve as a starting point for more complex solvers.
+!/*****************************************************************************/
+! *
+! *  Elmer, A Finite Element Software for Multiphysical Problems
+! *
+! *  Copyright 1st April 1995 - , CSC - IT Center for Science Ltd., Finland
+! *
+! *  This program is free software; you can redistribute it and/or
+! *  modify it under the terms of the GNU General Public License
+! *  as published by the Free Software Foundation; either version 2
+! *  of the License, or (at your option) any later version.
+! *
+! *  This program is distributed in the hope that it will be useful,
+! *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+! *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+! *  GNU General Public License for more details.
+! *
+! *  You should have received a copy of the GNU General Public License
+! *  along with this program (in file fem/GPL-2); if not, write to the
+! *  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+! *  Boston, MA 02110-1301, USA.
+! *
+! *****************************************************************************
+!
+!******************************************************************************
+! *
+! *  Authors: Mikko, Lyly, Juha Ruokolainen, Thomas Zwinger
+! *  Email:   Juha.Ruokolainen@csc.fi
+! *  Web:     http://www.csc.fi/elmer
+! *  Address: CSC - IT Center for Science Ltd.
+! *           Keilaranta 14
+! *           02101 Espoo, Finland
+! *
+! *  Original Date: 04 Apr 2004
+! *  Updated by: Geoffry Schrank
+! *  Update Date: 06 Feb 2017
+! *
+! ****************************************************************************
+
 !------------------------------------------------------------------------------
-SUBROUTINE SEOPSolver( Model,Solver,dt,TransientSimulation )
+!> A prototype solver that heavily relies on the Advection-Reaction Solver code
+!> to solver for laser absorption in SEOP processes.
+!>  Advection-reaction equation solver for scalar fields with discontinous Galerkin method.
+!> \ingroup Solvers
+!------------------------------------------------------------------------------
+SUBROUTINE SEOPSolver( Model,Solver,dt,Transient )
     !------------------------------------------------------------------------------
     USE DefUtils
 
     IMPLICIT NONE
     !------------------------------------------------------------------------------
-    TYPE(Solver_t) :: Solver
-    TYPE(Model_t) :: Model
-    REAL(KIND=dp) :: dt
-    LOGICAL :: TransientSimulation
+    TYPE(Model_t) :: Model            !< All model information (mesh, materials, BCs, etc...)
+    TYPE(Solver_t), TARGET :: Solver  !< Linear & nonlinear equation solver options
+    REAL(KIND=dp) :: dt               !< Timestep size for time dependent simulations
+    LOGICAL :: Transient    !< Steady state or transient simulation
     !------------------------------------------------------------------------------
-    ! Local variables
+    !    Local variables
     !------------------------------------------------------------------------------
-    TYPE(Element_t),POINTER :: Element
-    TYPE(Mesh_t), POINTER :: Mesh
-    REAL(KIND=dp), POINTER :: FluxTotal(:)
-    REAL(KIND=dp) :: Norm, NonlinearRelax
-    REAL(KIND=dp), ALLOCATABLE:: PFluxTotal(:)
-    INTEGER :: n, nb, nd, t, active
-    INTEGER :: iter, maxiter
-    LOGICAL :: Found
+    TYPE(ValueList_t), POINTER :: BC, BodyForce, Material,&
+        Equation, Constants, SolverParams
 
-    !Laser Configuration Variables------------------------------------------
+    TYPE(Element_t), POINTER :: Element, Face, &
+        ParentElement, LeftParent, RightParent
+
+    LOGICAL :: AllocationsDone = .FALSE., Found, Stat, &
+        LimitSolution, FoundLowerLimit, FoundUpperLimit
+    INTEGER :: Active, DIM,NonLinearIterMin,NonlinearIterMax,iter,&
+        CorrectedLowerLimit,CorrectedUpperLimit
+    INTEGER :: n1,n2, k, n, t, istat, i, j, dummyInt, NumberOfFAces, Indexes(128)
+#ifdef USE_ISO_C_BINDINGS
+     REAL(KIND=dp) :: Norm,RelativeChange,at,at0,totat,st,totst,&
+          OriginalValue
+#else
+        REAL(KIND=dp) :: Norm,RelativeChange,at,at0,totat,st,totst,CPUTime,RealTime,&
+        OriginalValue
+#endif
+    REAL(KIND=dp), ALLOCATABLE :: MASS(:,:), STIFF(:,:), LOAD(:), &
+        FORCE(:), Velo(:,:), MeshVelo(:,:), Gamma(:), Ref(:), &
+        UpperLimit(:), LowerLimit(:), nRb(:), spin_destruction(:), RbPol_Term(:), &
+        Absorption_Term(:), Flux(:)
+
+    !Laser Configuration Variables Declaration------------------------------------------
     REAL(KIND=dp) ::rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
         laser_linewidth,oscillator_strength,Beta
+    !---------------------------------------
 
+    TYPE(Mesh_t), POINTER :: Mesh
+    TYPE(Variable_t), POINTER ::  Var
+    CHARACTER(LEN=MAX_NAME_LEN) ::  VariableName, SolverName, ExpVariableName
 
+    SAVE MASS, STIFF, LOAD, FORCE, Velo, MeshVelo, Gamma, &
+        AllocationsDone, DIM, VariableName, SolverName, &
+        UpperLimit, LowerLimit, nRb, spin_destruction, RbPol_Term, Absorption_Term, Flux
+    !*******************************************************************************
+
+    TYPE( Element_t ), POINTER :: Faces(:)
+    TYPE(Nodes_t) :: ElementNodes
+
+    INTEGER :: DOFs
+    !*******************************************************************************
+    SolverName = 'SEOPSolver ('// TRIM(Solver % Variable % Name) // ')'
+    VariableName = TRIM(Solver % Variable % Name)
+    WRITE(Message,'(A,A)')&
+        'AdvectionReactionSolver for variable ', VariableName
+    CALL INFO(SolverName,Message,Level=1)
+
+    Mesh => GetMesh()
+
+    IF ( CoordinateSystemDimension() == 2 ) THEN
+        Faces => Mesh % Edges
+        NumberOfFaces = Mesh % NumberOfEdges
+    ELSE
+        Faces => Mesh % Faces
+        NumberOfFaces = Mesh % NumberOfFaces
+    END IF
+
+    ! Initialize & allocate some permanent storage, this is done first time only:
+    !----------------------------------------------------------------------------
+    IF ( .NOT. AllocationsDone ) THEN
+
+        N = 2 * MAX(Mesh % MaxElementDOFs, Mesh % MaxElementNodes )
+        ALLOCATE( FORCE(N), MASS(n,n), STIFF(N,N), LOAD(N),  &
+            Velo(3,N), MeshVelo( 3,N ), Gamma(n), &
+            UpperLimit(n), LowerLimit(n), nRb(n), spin_destruction(n), RbPol_Term(n), &
+            Absorption_Term(n), Flux(n), STAT = istat )
+
+        IF ( istat /= 0 ) THEN
+            CALL FATAL(SolverName,'Memory allocation error.' )
+        ELSE
+            CALL INFO(SolverName,'Memory allocation done',Level=1 )
+        END IF
+        DIM = CoordinateSystemDimension()
+        AllocationsDone = .TRUE.
+    END IF
+
+    !------------------------------------------------------------------------------
+    !    Read physical and numerical constants and initialize
+    !------------------------------------------------------------------------------
+    Constants => GetConstants()
+    SolverParams => GetSolverParams()
+
+    !------------------Get Laser Parameters----------------------------------------
     rubidium_wavelength = GetConstReal(Model % Constants,'rubidium wavelength',Found)
     laser_wavelength = GetConstReal(Model % Constants,'laser wavelength',Found)
     laser_linewidth = GetConstReal(Model % Constants,'laser line width',Found)
     rubidium_freq_width = GetConstReal(Model % Constants,'rubidium frequency width',Found)
     oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
     !------------------------------------------------------------------------------
+    NonlinearIterMax = GetInteger(   SolverParams, &
+        'Nonlinear System Max Iterations', Found )
+    IF ( .NOT.Found ) THEN
+        CALL WARN(SolverName,'No > Nonlinear System Max Iterations < found. Setting 1')
+        NonlinearIterMax = 1
+    END IF
 
-    !Non-Linear Solver Parameters--------------------------------------------------
+    NonlinearIterMin = GetInteger(   SolverParams, &
+        'Nonlinear System Min Iterations', Found )
+    IF ( .NOT.Found ) THEN
+        CALL WARN(SolverName,'No >Nonlinear System Min Iterations< found. Setting 1')
+        NonlinearIterMin = 1
+    ELSE IF (NonlinearIterMin > NonlinearIterMax) THEN
+        CALL WARN(SolverName,&
+            '>Nonlinear System Min Iterations< is exceeding >Nonlinear System Max Iterations<.')
+        CALL WARN(SolverName,&
+            'First is being reset to the latter.')
+        NonlinearIterMin = NonlinearIterMax
+    END IF
 
-    NonlinearRelax = GetConstReal( Solver % Values, &
-        'Nonlinear System Relaxation Factor', Found )
+    ExpVariableName = GetString(SolverParams , 'Exported Variable 1', Found )
+    IF (.NOT.Found) &
+        CALL FATAL(SolverName,'No value > Exported Variable 1 < found in Solver')
 
-     IF (.NOT. Found) NonlinearRelax = 1.0d0
+    LimitSolution = GetLogical( SolverParams, &
+        'Limit Solution', Found )
+    IF ( .NOT.Found ) &
+        LimitSolution = .FALSE.
 
-     IF (NonlinearRelax /= 1.0d0) THEN
-
-        FluxTotal => Solver % Variable % Values
-        ALLOCATE(PFluxTotal(Size(FluxTotal))) !So we know how big to make it later on
-
-     END IF
-
-
-    !-------Setup for the linearization of the photon flux
-    !Mesh => GetMesh()
-    !N = 2 * MAX(Mesh % MaxElementDOFs, Mesh % MaxElementNodes )
-    !ALLOCATE(Flux(N))
-
-    !-------------For Testing--------------------------------------
-    !rubidium_wavelength = 794.7e-9
-    !rubidium_freq_width = 126.65e9
-
-    !laser_wavelength = 795e-9
-    !laser_linewidth = 2e-9
-
-    !oscillator_strength = 1.0/3.0
-    !----------------------------------------------------------------
-
-    maxiter = ListGetInteger( GetSolverParams(),&
-        'Nonlinear System Max Iterations',Found,minv=1)
-    IF(.NOT. Found ) maxiter = 1
-
+    IF (LimitSolution) THEN
+        CALL INFO(SolverName, 'Keyword > Limit Solution < found. Solution will be limited',Level=1)
+    ELSE
+        CALL INFO(SolverName, 'No keyword > Limit Solution < found. Solution will not be limited',Level=1)
+    END IF
     !Calculate Beta for the this laser configuration----------------
 
     Beta = BetaCalc(rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
         laser_linewidth,oscillator_strength)
-    !PRINT *,"Beta",Beta
+
     !----------------------------------------------------------------
 
-    ! Nonlinear iteration loop:
-    !--------------------------
-    DO iter=1,maxiter
+    !------------------------------------------------------------------------------
+    !       non-linear system iteration loop
+    !------------------------------------------------------------------------------
+    totat = 0; totst = 0
+    DO iter=1,NonlinearIterMax
+        ! Assembly of the bulk elements:
+        !-------------------------------
+        !------------------------------------------------------------------------------
+        ! print out some information
+        !------------------------------------------------------------------------------
+        at  = CPUTime()
+        at0 = RealTime()
 
-        ! System assembly:
-        !----------------
+        CALL Info( SolverName, ' ', Level=4 )
+        CALL Info( SolverName, ' ', Level=4 )
+        CALL Info( SolverName, '-------------------------------------',Level=4 )
+        WRITE( Message,'(A,I3,A,I3)') &
+            'Nonlinear iteration no.', iter,' of max',NonlinearIterMax
+        CALL Info( SolverName, Message, Level=4 )
+        CALL Info( SolverName, '-------------------------------------',Level=4 )
+        CALL Info( SolverName, ' ', Level=4 )
+        CALL Info( SolverName, 'Starting Assembly...', Level=4 )
+
+
         CALL DefaultInitialize()
-
         Active = GetNOFActive()
+        DO t = 1, Active
+            !------------------------------------------------------------------------------
+            ! write some info on status of assembly
+            !------------------------------------------------------------------------------
+            IF ( RealTime() - at0 > 1.0 ) THEN
+                WRITE(Message,'(a,i3,a)' ) '   Assembly: ', INT(100.0 - 100.0 * &
+                    (Active-t) / &
+                    (1.0*Active)), ' % done'
 
-        DO t=1,Active
-            Element => GetActiveElement(t)
-            n  = GetElementNOFNodes()
-            nd = GetElementNOFDOFs()
-            nb = GetElementNOFBDOFs()
+                CALL Info( SolverName, Message, Level=5 )
+
+                at0 = RealTime()
+            END IF
+            !------------------------------------------------------------------------------
+            ! assign pointers and get number of nodes in element
+            !------------------------------------------------------------------------------
+            Element => GetActiveElement( t )
+            n = GetElementNOfNodes( Element )
+            Material => GetMaterial()
+            BodyForce => GetBodyForce( Element )
+            Equation => GetEquation()
+            IF (LimitSolution) THEN
+                dummyInt = GetElementDOFs( Indexes )
+                UpperLimit(1:n) = GetReal(Material,TRIM(VariableName) // ' Upper Limit', FoundUpperLimit)
+                LowerLimit(1:n) = GetReal(Material,TRIM(VariableName) // ' Lower Limit', FoundLowerLimit)
+                DO i=1,n
+                    IF (FoundUpperLimit) THEN
+                        OriginalValue = Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) )
+                        IF (OriginalValue > UpperLimit(i)) THEN
+                            Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) ) = UpperLimit(i)
+                            CorrectedUpperLimit = CorrectedUpperLimit + 1
+                        END IF
+                        IF (OriginalValue < LowerLimit(i)) THEN
+                            Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) ) = LowerLimit(i)
+                            CorrectedLowerLimit = CorrectedLowerLimit + 1
+                        END IF
+                    END IF
+                END DO
+            END IF
+            !------------------------------------------------------------------------------
+            ! the body force (r.h.s) = source
+            !------------------------------------------------------------------------------
+            LOAD(1:n) = GetReal( BodyForce, TRIM(VariableName) // ' Source', Found )
+            IF (.NOT.Found) THEN
+                WRITE(Message,'(A,A,A)') 'Body Force >',TRIM(VariableName) // ' Source','< not found'
+                CALL INFO(SolverName, Message, Level=42)
+                LOAD(1:n)  = 0.0d0
+            END IF
+            !------------------------------------------------------------------------------
+            ! Get convection and mesh velocity
+            CALL GetLocalALEVelocity(Velo,MeshVelo,SolverName,Material,&
+                Equation,Solver,Model,Element)
+
+            !------------------------------------------------------------------------------
+            !Get the Material Properties---------------------------------------------------
+
+            nRb(1:n)=GetReal(Material,'rubidium number density',Found)
+            spin_destruction(1:n) = GetReal(Material,'spin destruction rate',Found)
+
+            Absorption_Term(1:n) = Beta*nRb(1:n)
+
+            !-----------------------Get the Local Solution for the Non-Linear Term----------
+            GetLocalScalarSolution(Flux)
+
+            !---------------------Non-linear Term---------------------------------------------------------
+            DO i = 1,n
+                !IF(Flux(i)<0) Flux(i) = 0 !To prevent non-physical values of the photon flux
+                RbPol_Term(i) = (1.)-(Flux(i)/(Flux(i)+spin_destruction(i)))
+                Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
+            END DO
+
+            !-----------------------
+            ! get reaction constant
+            !-----------------------
+            Gamma(1:n) = Absorption_Term(1:n)
+
+            !Gamma(1:n)  = GetReal( Material, TRIM(VariableName) // ' Gamma', Found )
+            !IF (.NOT.Found) THEN
+            !    WRITE(Message,'(A,A,A)') 'Material Property >',TRIM(VariableName) // ' Gamma','< not found'
+            !    CALL INFO(SolverName, Message, Level=42)
+            !    Gamma(1:n)  = 0.0d0
+            !END IF
+
+            CALL LocalMatrix( MASS, STIFF, FORCE, LOAD, Velo, MeshVelo, Gamma, Element, n )
+            IF ( Transient ) CALL Default1stOrderTime( MASS, STIFF, FORCE )
+            CALL DefaultUpdateEquations( STIFF, FORCE )
+        END DO
 
 
-            CALL LocalMatrix(  Element, n, nd + nb, Beta )
+        ! Assembly of the face terms:
+        !----------------------------
+        FORCE = 0.0d0
+        DO t=1,NumberOfFaces
+            Face => Faces(t)
+            IF ( .NOT. ActiveBoundaryElement(Face) ) CYCLE
+
+            LeftParent  => Face % BoundaryInfo % Left
+            RightParent => Face % BoundaryInfo % Right
+            IF ( ASSOCIATED(RightParent) .AND. ASSOCIATED(LeftParent) ) THEN
+                n  = GetElementNOFNodes( Face )
+                n1 = GetElementNOFNodes( LeftParent )
+                n2 = GetElementNOFNodes( RightParent )
+
+                !------------------------------------------------------------------------------
+                ! Get convection and mesh velocity
+                !------------------------------------------------------------------------------
+                Material => GetMaterial( LeftParent )
+                Equation => GetEquation( LeftParent )
+                CALL GetLocalALEVelocity(Velo,MeshVelo,SolverName,Material,&
+                    Equation,Solver,Model,Face)
+
+                CALL LocalJumps( STIFF,Face,n,LeftParent,n1,RightParent,n2,Velo )
+                CALL DefaultUpdateEquations( STIFF, FORCE, Face )
+            END IF
         END DO
 
         CALL DefaultFinishBulkAssembly()
 
-        Active = GetNOFBoundaryElements()
-        DO t=1,Active
+
+        ! Loop over the boundary elements:
+        !---------------------------------
+        DO t=1,Mesh % NumberOfBoundaryElements
             Element => GetBoundaryElement(t)
-            IF(ActiveBoundaryElement()) THEN
-                n  = GetElementNOFNodes()
-                nd = GetElementNOFDOFs()
-                nb = GetElementNOFBDOFs()
-                CALL LocalMatrixBC(  Element, n, nd+nb )
+            IF( .NOT. ActiveBoundaryElement() )  CYCLE
+
+            !------------------------------------------------------------------------------
+            ! Check that the dimension of element is suitable for BCs
+            !------------------------------------------------------------------------------
+            IF( .NOT. PossibleFluxElement(Element) ) CYCLE
+
+            ParentElement => Element % BoundaryInfo % Left
+            IF ( .NOT. ASSOCIATED( ParentElement ) ) &
+                ParentElement => Element % BoundaryInfo % Right
+
+            n  = GetElementNOFNodes( Element )
+            n1 = GetElementNOFnodes( ParentElement )
+
+            !------------------------------------------------------------------------------
+            ! Get convection and mesh velocity
+            !------------------------------------------------------------------------------
+            Material => GetMaterial( ParentElement )
+            Equation => GetEquation( ParentElement )
+            CALL GetLocalALEVelocity(Velo,MeshVelo,SolverName,Material,&
+                Equation,Solver,Model,Element)
+
+            BC => GetBC()
+            LOAD = 0.0d0
+            Found = .FALSE.
+            IF ( ASSOCIATED(BC) ) THEN
+                LOAD(1:n) = GetReal( BC, Solver % Variable % Name, Found )
             END IF
+
+            MASS = 0.0d0
+            CALL LocalMatrixBoundary(  STIFF, FORCE, LOAD, &
+                Element, n, ParentElement, n1, Velo, Found )
+
+            IF ( Transient ) CALL Default1stOrderTime( MASS, STIFF, FORCE )
+            CALL DefaultUpdateEquations( STIFF, FORCE )
         END DO
 
-        !---------------------------------------------------------
-
-        CALL DefaultFinishBoundaryAssembly()
         CALL DefaultFinishAssembly()
-        CALL DefaultDirichletBCs()
+        CALL Info( SolverName, 'Assembly done', Level=4 )
 
-        !Remember solution for relaxation, if we have a relaxation factor
+        !------------------------------------------------------------------------------
+        !     Solve the system and check for convergence
+        !------------------------------------------------------------------------------
+        at = CPUTime() - at
+        st = CPUTime()
 
-        IF (NonlinearRelax /= 1.0d0) PFluxTotal = FluxTotal
-
-
-        ! And finally, solve:
-        !--------------------
-
+        ! Solve the system:
+        !------------------
         Norm = DefaultSolve()
 
-        !----Relaxation-------------------------------------------
-        IF (NonlinearRelax /= 1.0d0) THEN
+        st = CPUTIme()-st
+        totat = totat + at
+        totst = totst + st
+        WRITE(Message,'(a,i4,a,F8.2,F8.2)') 'iter: ',iter,' Assembly: (s)', at, totat
+        CALL Info( SolverName, Message, Level=4 )
+        WRITE(Message,'(a,i4,a,F8.2,F8.2)') 'iter: ',iter,' Solve:    (s)', st, totst
+        CALL Info( SolverName, Message, Level=4 )
 
-            FluxTotal = (1-NonlinearRelax)*PFluxTotal + &
-                    NonlinearRelax*FluxTotal
+        RelativeChange = Solver % Variable % NonlinChange
 
-            CALL ComputeChange( Solver, .FALSE., n, FluxTotal, PFluxTotal )
-
+        IF ( Solver % Variable % NonlinConverged == 1 )  THEN
+            WRITE(Message,'(A,I6,A,I6,A)') &
+                'Nonlinear iteration converged after ', iter, &
+                ' out of max ',NonlinearIterMax,' iterations'
+            CALL INFO(SolverName,Message)
+            EXIT
+        ELSE IF ((iter .EQ. NonlinearIterMax) .AND. (NonlinearIterMax > 1)) THEN
+            CALL WARN(SolverName,'Maximum nonlinear iterations reached, but system not converged')
         END IF
 
-        IF( Solver % Variable % NonlinConverged == 1 ) EXIT
+    !-----------------------------------------------
+    END DO ! End of nonlinear iteration loop
+    !----------------------------------------------
 
-    END DO
-
-CONTAINS
-
-    ! Assembly of the matrix entries arising from the bulk elements
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrix( Element, n, nd , Beta)
-        !------------------------------------------------------------------------------
-        INTEGER :: n, nd
-        TYPE(Element_t), POINTER :: Element
-        !------------------------------------------------------------------------------
-        REAL(KIND=dp) :: Beta, Absorption_Term(n), nRb(n), spin_destruction(n), &
-            D,C,R, direction(3,n),a(3), Weight, Flux(n), RbPol_Term(n),one
-        REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
-        !REAL(KIND=dp) :: rubidium_wavelength
-        REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd)
-        LOGICAL :: Stat,Found
-        INTEGER :: i,t,p,q,dim
-        TYPE(GaussIntegrationPoints_t) :: IP
-        TYPE(ValueList_t), POINTER :: BodyForce, Material
-        TYPE(Nodes_t) :: Nodes
-        SAVE Nodes
-        !------------------------------------------------------------------------------
-
-        dim = CoordinateSystemDimension()
-
-        !CALL GetScalarLocalSolution(SOL,UElement=Element)
-        CALL GetElementNodes( Nodes )
-        CALL GetScalarLocalSolution(Flux)
-
-        MASS  = 0._dp
-        STIFF = 0._dp
-        FORCE = 0._dp
-        RbPol_Term = 0._dp
-        Absorption_Term = 0._dp
-
-
-        Material => GetMaterial()
-        nRb(1:n)=GetReal(Material,'rubidium number density',Found)
-        spin_destruction(1:n) = GetReal(Material,'spin destruction rate',Found)
-
-        Absorption_Term(1:n) = Beta*nRb(1:n)
-
-        !---------------------Non-linear Term---------------------------------------------------------
-        DO i = 1,n
-            IF(Flux(i)<0) Flux(i) = 0 !To prevent non-physical values of the photon flux
-            RbPol_Term(i) = (1.)-(Flux(i)/(Flux(i)+spin_destruction(i)))
-            Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
+    ! limit solution
+    !------------------------------------------------------------------------------
+    CorrectedUpperLimit = 0
+    CorrectedLowerLimit = 0
+    IF (LimitSolution) THEN
+        Active = GetNOFActive()
+        DO t = 1, Active
+            Element => GetActiveElement( t )
+            n = GetElementNOfNodes( Element )
+            Material => GetMaterial()
+            dummyInt = GetElementDOFs( Indexes )
+            UpperLimit(1:n) = GetReal(Material,TRIM(VariableName) // ' Upper Limit', FoundUpperLimit)
+            LowerLimit(1:n) = GetReal(Material,TRIM(VariableName) // ' Lower Limit', FoundLowerLimit)
+            DO i=1,n
+                IF (FoundUpperLimit) THEN
+                    OriginalValue = Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) )
+                    IF (OriginalValue > UpperLimit(i)) THEN
+                        Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) ) = &
+                            MIN(UpperLimit(i), OriginalValue)
+                        CorrectedUpperLimit = CorrectedUpperLimit + 1
+                    END IF
+                    IF (OriginalValue < LowerLimit(i)) THEN
+                        Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) ) = &
+                            MAX(LowerLimit(i), OriginalValue )
+                        CorrectedLowerLimit = CorrectedLowerLimit + 1
+                    END IF
+                END IF
+            END DO
         END DO
-
-        !-----------------------------------------------------------------------------------------------------------
-        direction = 0._dp
-
-        DO i=1,dim
-            direction(i,1:n)=GetReal(Material,&
-                'laser direction '//TRIM(I2S(i)),Found)
-        END DO
-
-        ! Numerical integration:
-        !-----------------------
-        IP = GaussPoints( Element )
-        DO t=1,IP % n
-            ! Basis function values & derivatives at the integration point:
-            !--------------------------------------------------------------
-            stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), &
-                IP % W(t), detJ, Basis, dBasisdx )
-
-            ! The source term at the integration point:
-            !------------------------------------------
+        WRITE(Message,'(a,i10)') 'Limited values for upper limit: ', CorrectedUpperLimit
+        CALL Info( SolverName, Message, Level=3 )
+        WRITE(Message,'(a,i10)') 'Limited values for lower limit: ', CorrectedLowerLimit
+        CALL Info( SolverName, Message, Level=3 )
+    END IF
 
 
-            a = MATMUL(direction(:,1:n),Basis(1:n))
-            R = SUM(Basis(1:n)*Absorption_Term(1:n))
+    ! Average the elemental results to nodal values:
+    !-----------------------------------------------
+    Var => VariableGet( Mesh % Variables,TRIM(ExpVariableName))
+    IF ( ASSOCIATED( Var ) ) THEN
+        n1 = Mesh % NumberOfNodes
+        ALLOCATE( Ref(n1) )
+        Ref = 0
+        Var % TYPE = Variable_on_nodes
 
-            Weight = IP % s(t) * DetJ
+        IF ( ASSOCIATED( Var % Perm, Solver % Variable % Perm ) ) THEN
+            ALLOCATE( Var % Perm(SIZE(Solver % Variable % Perm))  )
+            Var % Perm = 0
+            DO i = 1,n1
+                Var % Perm(i) = i
+            END DO
+        END IF
 
-            DO p=1,nd
-                DO q=1,nd
-                    ! Spacial derivative term
-                    ! -----------------------------------
-                    STIFF (p,q) = STIFF(p,q) + Weight * &
-                        SUM(a(1:dim)*dBasisdx(q,1:dim)) * Basis(p)
-
-                    ! Absorption Term
-                    ! -----------------------------------
-                    STIFF(p,q) = STIFF(p,q) + Weight * R * Basis(q) * Basis(p)
-
-
-                END DO
+        Var % Values = 0.0d0
+        DO t=1,Active
+            Element => GetActiveElement(t)
+            n = GetElementDOFs( Indexes )
+            n = GetElementNOFNodes()
+            DO i=1,n
+                k = Element % NodeIndexes(i)
+                Var % Values(k) = Var % Values(k) + &
+                    Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) )
+                Ref(k) = Ref(k) + 1
             END DO
         END DO
 
-        IF(TransientSimulation) CALL Default1stOrderTime(MASS,STIFF,FORCE)
-        CALL LCondensate( nd-nb, nb, STIFF, FORCE )
-        CALL DefaultUpdateEquations(STIFF,FORCE)
+        WHERE( Ref > 0 )
+            Var % Values(1:n1) = Var % Values(1:n1) / Ref
+        END WHERE
+        DEALLOCATE( Ref )
+    ELSE
+        WRITE(Message,'(A,A,A)') 'Exported Variable >',TRIM(VariableName) //   ' Nodal Result','< not found'
+        CALL FATAL(SolverName,Message)
+    END IF
+
+CONTAINS
+
+    !------------------------------------------------------------------------------
+    SUBROUTINE LocalMatrix(MASS, STIFF, FORCE, LOAD, Velo, Mvelo, Gamma, Element, n)
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: MASS(:,:), STIFF(:,:), FORCE(:), &
+            LOAD(:), Velo(:,:), Gamma(:), MVelo(:,:)
+        INTEGER :: n
+        TYPE(Element_t), POINTER :: Element
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: Basis(n),dBasisdx(n,3)
+        REAL(KIND=dp) :: detJ,U,V,W,S,A,L,cu(3),g,divMVelo
+        LOGICAL :: Stat
+        INTEGER :: i,p,q,t,dim
+        TYPE(GaussIntegrationPoints_t) :: IntegStuff
+        TYPE(Nodes_t) :: Nodes
+        SAVE Nodes
+        !------------------------------------------------------------------------------
+        dim = CoordinateSystemDimension()
+        FORCE = 0.0d0
+        STIFF = 0.0d0
+        MASS  = 0.0d0
+        CALL GetElementNodes( Nodes, Element )
+        !------------------------------------------------------------------------------
+        !      Numerical integration
+        !------------------------------------------------------------------------------
+        IntegStuff = GaussPoints( Element )
+
+        DO t=1,IntegStuff % n
+            U = IntegStuff % u(t)
+            V = IntegStuff % v(t)
+            W = IntegStuff % w(t)
+            S = IntegStuff % s(t)
+            !------------------------------------------------------------------------------
+            !        Basis function values & derivatives at the integration point
+            !------------------------------------------------------------------------------
+            stat = ElementInfo( Element, Nodes, U, V, W, detJ, &
+                Basis, dBasisdx )
+
+            S = S * detJ
+            L = SUM( LOAD(1:n) *  Basis(1:n) )
+            g = SUM( Basis(1:n) * Gamma(1:n) )
+
+            ! This term was missing for the ALE formulation
+            divMVelo = 0.0_dp
+            DO i=1,dim
+                divMVelo = divMVelo + SUM( MVelo(i,1:n) * dBasisdx(1:n,i) )
+            END DO
+
+            cu   = 0.0d0
+            DO i=1,dim
+                cu(i) = SUM( Basis(1:n) * Velo(i,1:n) )
+            END DO
+            !------------------------------------------------------------------------------
+            !        The advection-reaction equation: dc/dt + grad(u . c) + gamma c = s
+            !------------------------------------------------------------------------------
+            DO p=1,n
+                DO q=1,n
+                    MASS(p,q)  = MASS(p,q)  + s * Basis(q) * Basis(p)
+                    STIFF(p,q) = STIFF(p,q) + s * (g + divMVelo) * Basis(q) * Basis(p)
+                    DO i=1,dim
+                        STIFF(p,q) = STIFF(p,q) - s * cu(i) * Basis(q) * dBasisdx(p,i)
+                    END DO
+                END DO
+            END DO
+            FORCE(1:n) = FORCE(1:n) + s*L*Basis(1:n)
+        !------------------------------------------------------------------------------
+        END DO
     !------------------------------------------------------------------------------
     END SUBROUTINE LocalMatrix
     !------------------------------------------------------------------------------
 
 
-    ! Assembly of the matrix entries arising from the Neumann and Robin conditions
-    !There are no possible Neumann or Robin conditions for this equation, set all to
-    !zero.
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrixBC( Element, n, nd )
+    SUBROUTINE FindParentUVW(Face, nFace, Parent, nParent, U, V, W, Basis)
         !------------------------------------------------------------------------------
-        INTEGER :: n, nd
-        TYPE(Element_t), POINTER :: Element
+        IMPLICIT NONE
+        TYPE(Element_t) :: Face, Parent
+        INTEGER :: nFace, nParent
+        REAL( KIND=dp ) :: U, V, W, Basis(:)
         !------------------------------------------------------------------------------
-        REAL(KIND=dp) :: Weight
-        REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ
-        REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd)
-        LOGICAL :: Stat,Found
-        INTEGER :: i,t,p,q,dim
-        TYPE(GaussIntegrationPoints_t) :: IP
-
-        TYPE(ValueList_t), POINTER :: BC
-
-        TYPE(Nodes_t) :: Nodes
-        SAVE Nodes
+        INTEGER :: i,j
+        REAL(KIND=dp) :: ParentU(nFace), ParentV(nFace), ParentW(nFace)
         !------------------------------------------------------------------------------
-        BC => GetBC()
-        IF (.NOT.ASSOCIATED(BC) ) RETURN
+        DO i = 1,nFace
+            DO j = 1,nParent
+                IF ( Face % NodeIndexes(i) == Parent % NodeIndexes(j) ) THEN
+                    ParentU(i) = Parent % TYPE % NodeU(j)
+                    ParentV(i) = Parent % TYPE % NodeV(j)
+                    ParentW(i) = Parent % TYPE % NodeW(j)
+                    EXIT
+                END IF
+            END DO
+        END DO
+        U = SUM( Basis(1:nFace) * ParentU(1:nFace) )
+        V = SUM( Basis(1:nFace) * ParentV(1:nFace) )
+        W = SUM( Basis(1:nFace) * ParentW(1:nFace) )
+    !------------------------------------------------------------------------------
+    END SUBROUTINE FindParentUVW
+    !------------------------------------------------------------------------------
 
+
+    !------------------------------------------------------------------------------
+    SUBROUTINE LocalJumps( STIFF,Face,n,LeftParent,n1,RightParent,n2,Velo )
+        !------------------------------------------------------------------------------
+        IMPLICIT NONE
+        REAL(KIND=dp) :: STIFF(:,:), Velo(:,:)
+        INTEGER :: n,n1,n2
+        TYPE(Element_t), POINTER :: Face, LeftParent, RightParent
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: FaceBasis(n), FacedBasisdx(n,3)
+        REAL(KIND=dp) :: LeftBasis(n1), LeftdBasisdx(n1,3)
+        REAL(KIND=dp) :: RightBasis(n2), RightdBasisdx(n2,3)
+        REAL(KIND=dp) :: Jump(n1+n2), Average(n1+n2)
+        REAL(KIND=dp) :: detJ, U, V, W, S, Udotn, xx, yy
+        LOGICAL :: Stat
+        INTEGER :: i, j, p, q, dim, t, nFace, nParent
+        TYPE(GaussIntegrationPoints_t) :: IntegStuff
+        REAL(KIND=dp) :: hE, Normal(3), cu(3), LeftOut(3)
+
+        TYPE(Nodes_t) :: FaceNodes, LeftParentNodes, RightParentNodes
+        SAVE FaceNodes, LeftParentNodes, RightParentNodes
+        !------------------------------------------------------------------------------
         dim = CoordinateSystemDimension()
+        STIFF = 0.0d0
 
-        CALL GetElementNodes( Nodes )
-        STIFF = 0._dp
-        FORCE = 0._dp
-
-        IP = GaussPoints( Element )
-
-        CALL DefaultUpdateEquations(STIFF,FORCE)
-    !------------------------------------------------------------------------------
-    END SUBROUTINE LocalMatrixBC
-    !------------------------------------------------------------------------------
-
-    ! Perform static condensation in case bubble dofs are present
-    !------------------------------------------------------------------------------
-    SUBROUTINE LCondensate( N, Nb, K, F )
+        CALL GetElementNodes( FaceNodes, Face )
+        CALL GetElementNodes( LeftParentNodes,  LeftParent )
+        CALL GetElementNodes( RightParentNodes, RightParent )
         !------------------------------------------------------------------------------
-        USE LinearAlgebra
-        INTEGER :: N, Nb
-        REAL(KIND=dp) :: K(:,:),F(:),Kbb(Nb,Nb), &
-            Kbl(Nb,N), Klb(N,Nb), Fb(Nb)
+        !     Numerical integration over the edge
+        !------------------------------------------------------------------------------
+        IntegStuff = GaussPoints( Face )
 
-        INTEGER :: m, i, j, l, p, Ldofs(N), Bdofs(Nb)
+        LeftOut(1) = SUM(LeftParentNodes % x(1:n1)) / n1
+        LeftOut(2) = SUM(LeftParentNodes % y(1:n1)) / n1
+        LeftOut(3) = SUM(LeftParentNodes % z(1:n1)) / n1
+        LeftOut(1) = SUM(FaceNodes % x(1:n)) / n - LeftOut(1)
+        LeftOut(2) = SUM(FaceNodes % y(1:n)) / n - LeftOut(2)
+        LeftOut(3) = SUM(FaceNodes % z(1:n)) / n - LeftOut(3)
 
-        IF ( Nb <= 0 ) RETURN
+        DO t=1,IntegStuff % n
+            U = IntegStuff % u(t)
+            V = IntegStuff % v(t)
+            W = IntegStuff % w(t)
+            S = IntegStuff % s(t)
 
-        Ldofs = (/ (i, i=1,n) /)
-        Bdofs = (/ (i, i=n+1,n+nb) /)
+            ! Basis function values & derivatives at the integration point:
+            !--------------------------------------------------------------
+            stat = ElementInfo( Face, FaceNodes, U, V, W, detJ, &
+                FaceBasis, FacedBasisdx )
 
-        Kbb = K(Bdofs,Bdofs)
-        Kbl = K(Bdofs,Ldofs)
-        Klb = K(Ldofs,Bdofs)
-        Fb  = F(Bdofs)
+            S = S * detJ
 
-        CALL InvertMatrix( Kbb,nb )
+            Normal = NormalVector( Face, FaceNodes, U, V, .FALSE. )
+            IF ( SUM( LeftOut*Normal ) < 0 ) Normal = -Normal
 
-        F(1:n) = F(1:n) - MATMUL( Klb, MATMUL( Kbb, Fb  ) )
-        K(1:n,1:n) = K(1:n,1:n) - MATMUL( Klb, MATMUL( Kbb, Kbl ) )
+            ! Find basis functions for the parent elements:
+            ! ---------------------------------------------
+            CALL FindParentUVW( Face,n,LeftParent,n1,U,V,W,FaceBasis )
+            stat = ElementInfo( LeftParent, LeftParentNodes, U, V, W, detJ, &
+                LeftBasis, LeftdBasisdx )
+
+            CALL FindParentUVW( Face,n,RightParent,n2,U,V,W,FaceBasis )
+            stat = ElementInfo( RightParent, RightParentNodes, U, V, W, detJ, &
+                RightBasis, RightdBasisdx )
+
+            ! Integrate jump terms:
+            ! ---------------------
+            Jump(1:n1) = LeftBasis(1:n1)
+            Jump(n1+1:n1+n2) = -RightBasis(1:n2)
+
+            Average(1:n1) = LeftBasis(1:n1) / 2
+            Average(n1+1:n1+n2) = RightBasis(1:n2) / 2
+
+            cu = 0.0d0
+            DO i=1,dim
+                cu(i) = SUM( Velo(i,1:n) * FaceBasis(1:n) )
+            END DO
+            Udotn = SUM( Normal * cu )
+
+            DO p=1,n1+n2
+                DO q=1,n1+n2
+                    STIFF(p,q) = STIFF(p,q) + s * Udotn * Average(q) * Jump(p)
+                    STIFF(p,q) = STIFF(p,q) + s * ABS(Udotn)/2 * Jump(q) * Jump(p)
+                END DO
+            END DO
+        END DO
     !------------------------------------------------------------------------------
-    END SUBROUTINE LCondensate
+    END SUBROUTINE LocalJumps
     !------------------------------------------------------------------------------
+
+
+
+    !------------------------------------------------------------------------------
+    SUBROUTINE LocalMatrixBoundary( STIFF, FORCE, LOAD, &
+        Element, n, ParentElement, np, Velo, InFlowBC )
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: STIFF(:,:),  FORCE(:), LOAD(:), Velo(:,:)
+        INTEGER :: n, np
+        LOGICAL :: InFlowBC
+        TYPE(Element_t), POINTER :: Element, ParentElement
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: Basis(n), dBasisdx(n,3)
+        REAL(KIND=dp) :: ParentBasis(np), ParentdBasisdx(np,3)
+        INTEGER :: i,j,p,q,t,dim
+
+        REAL(KIND=dp) :: Normal(3), g, L, Udotn, cu(3), cu1(3), detJ,U,V,W,S
+        LOGICAL :: Stat, Inflow
+        TYPE(GaussIntegrationPoints_t) :: IntegStuff
+
+        TYPE(Nodes_t) :: Nodes, ParentNodes
+        SAVE Nodes, ParentNodes
+        !------------------------------------------------------------------------------
+        dim = CoordinateSystemDimension()
+        FORCE = 0.0d0
+        STIFF = 0.0d0
+
+        CALL GetElementNodes( Nodes, Element )
+        CALL GetElementNodes( ParentNodes, ParentElement )
+
+        Normal = NormalVector( Element, Nodes, 0.0d0, 0.0d0, .TRUE. )
+        DO i=1,3
+            cu(i) = SUM( Velo(i,1:n) ) / n
+        END DO
+        Inflow = InFlowBC .AND. SUM( Normal * cu ) < 0.0d0
+
+        ! Numerical integration:
+        !-----------------------
+        IntegStuff = GaussPoints( Element )
+
+        DO t=1,IntegStuff % n
+            U = IntegStuff % u(t)
+            V = IntegStuff % v(t)
+            W = IntegStuff % w(t)
+            S = IntegStuff % s(t)
+
+            Normal = NormalVector( Element, Nodes, U, V, .TRUE. )
+
+            ! Basis function values & derivatives at the integration point:
+            ! -------------------------------------------------------------
+            stat = ElementInfo( Element, Nodes, U, V, W, detJ, &
+                Basis, dBasisdx )
+            S = S * detJ
+
+            CALL FindParentUVW( Element, n, ParentElement, np, U, V, W, Basis )
+            stat = ElementInfo( ParentElement, ParentNodes, U, V, W, &
+                detJ, ParentBasis, ParentdBasisdx )
+
+            L = SUM( LOAD(1:n) * Basis(1:n) )
+            cu = 0.0d0
+            DO i=1,dim
+                cu(i)  = SUM( Velo(i,1:n) * Basis(1:n) )
+            END DO
+            Udotn = SUM( Normal * cu )
+
+            DO p = 1,np
+                IF ( Inflow ) THEN
+                    FORCE(p) = FORCE(p) - s * Udotn*L*ParentBasis(p)
+                ELSE
+                    DO q=1,np
+                        STIFF(p,q) = STIFF(p,q) + s*Udotn*ParentBasis(q)*ParentBasis(p)
+                    END DO
+                END IF
+            END DO
+        END DO
+    !------------------------------------------------------------------------------
+    END SUBROUTINE LocalMatrixBoundary
+    !------------------------------------------------------------------------------
+    !
+    !------------------------------------------------------------------------------
+    SUBROUTINE GetLocalALEVelocity(Velo,MeshVelo,SolverName,Material,&
+        Equation,Solver,Model,Element)
+        IMPLICIT NONE
+        !------------------------------------------------------------------------------
+        REAL (KIND=dp) :: Velo(:,:), MeshVelo(:,:)
+        CHARACTER(LEN=MAX_NAME_LEN) :: SolverName
+        TYPE(ValueList_t), POINTER :: Material,Equation
+        TYPE(Solver_t), TARGET :: Solver
+        TYPE(Model_t), TARGET :: Model
+        TYPE(Element_t),POINTER :: Element
+        !------------------------------------------------------------------------------
+        CHARACTER(LEN=MAX_NAME_LEN) :: ConvectionFlag, FlowSolName
+        INTEGER :: i,j,k,N,FlowDOFs
+        INTEGER, POINTER :: FlowPerm(:)
+        REAL(KIND=dp), POINTER :: FlowSolution(:)
+        TYPE(Variable_t), POINTER :: FlowSol
+        LOGICAL :: Found
+        !------------------------------------------------------------------------------
+        n  = GetElementNOFNodes( Element )
+        ConvectionFlag = GetString( Equation, 'Convection', Found )
+        IF (.NOT. Found) &
+            CALL FATAL(SolverName, 'No string for keyword >Convection< found in Equation')
+        Velo = 0.0d00
+        !Get the laser direction. I've commented out all the computed velocity stuff because
+        !I don't need it.
+        !---------------------------------------------------
+        !IF ( ConvectionFlag == 'constant' ) THEN
+        Velo(1,1:N) = GetReal( Material, 'Laser Direction 1', Found, Element )
+        IF (.NOT.Found) Velo(1,1:N) = 0.0d0
+        Velo(2,1:N) = GetReal( Material, 'Laser Direction 2', Found, Element )
+        IF (.NOT.Found) Velo(2,1:N) = 0.0d0
+        Velo(3,1:N) = GetReal( Material, 'Laser Direction 3', Found, Element )
+        IF (.NOT.Found) Velo(3,1:N) = 0.0d0
+           ! computed velocity
+           !------------------Equation => GetEquation()
+        !ELSE IF (ConvectionFlag == 'computed' ) THEN
+        !    FlowSolName =  GetString( Equation,'Flow Solution Name', Found)
+        !    IF(.NOT.Found) THEN
+        !        CALL WARN(SolverName,'Keyword >Flow Solution Name< not found in section >Equation<')
+        !        CALL WARN(SolverName,'Taking default value >Flow Solution<')
+        !        WRITE(FlowSolName,'(A)') 'Flow Solution'
+        !    END IF
+        !    FlowSol => VariableGet( Solver % Mesh % Variables, FlowSolName )
+        !    IF ( ASSOCIATED( FlowSol ) ) THEN
+        !        FlowPerm     => FlowSol % Perm
+        !        FlowDOFs     =  FlowSol % DOFs
+        !        FlowSolution => FlowSol % Values
+        !    ELSE
+        !        WRITE(Message,'(A,A,A)') &
+        !            'Convection flag set to >computed<, but no variable >',FlowSolName,'< found'
+        !        CALL FATAL(SolverName,Message)
+        !    END IF
+
+
+        !    DO i=1,n
+        !        k = FlowPerm(Element % NodeIndexes(i))
+        !        IF ( k > 0 ) THEN
+                    ! Pressure = FlowSolution(FlowDOFs*k)
+
+        !            SELECT CASE( FlowDOFs )
+         !               CASE(2)
+          !                  Velo(1,i) = FlowSolution( FlowDOFs*k-1 )
+           !                 Velo(2,i) = 0.0d0
+            !                Velo(3,i) = 0.0d0
+             !           CASE(3)
+              !              Velo(1,i) = FlowSolution( FlowDOFs*k-2 )
+               !             Velo(2,i) = FlowSolution( FlowDOFs*k-1 )
+                !            Velo(3,i) = 0.0d0
+                 !       CASE(4)
+                  !          Velo(1,i) = FlowSolution( FlowDOFs*k-3 )
+                   !         Velo(2,i) = FlowSolution( FlowDOFs*k-2 )
+                    !        Velo(3,i) = FlowSolution( FlowDOFs*k-1 )
+                    !END SELECT
+                !END IF
+            !END DO
+        !ELSE IF (ConvectionFlag == 'none' ) THEN
+        !    Velo = 0.0d0
+        !ELSE
+        !    WRITE(Message,'(A,A,A)') 'Convection flag >', ConvectionFlag ,'< not recognised'
+        !    CALL FATAL(SolverName,Message)
+        !END IF
+        CALL INFO(SolverName,Message,Level=10)
+        !-------------------------------------------------
+        ! Add mesh velocity (if any) for ALE formulation
+        !-------------------------------------------------
+        MeshVelo = 0.0d0
+        CALL GetVectorLocalSolution( MeshVelo, 'Mesh Velocity', Element)
+        IF (ANY( MeshVelo /= 0.0d0 )) THEN
+            DO i=1,FlowDOFs
+                Velo(i,1:N) = Velo(i,1:N) - MeshVelo(i,1:N)
+            END DO
+        END IF
+    END SUBROUTINE GetLocalALEVelocity
 
     FUNCTION BetaCalc(rubidium_wavelength,rubidium_freq_width,laser_wavelength,&
         laser_linewidth,oscillator_strength) RESULT (Beta)
