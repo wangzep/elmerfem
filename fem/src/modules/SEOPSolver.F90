@@ -274,7 +274,12 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,Transient )
             Absorption_Term(1:n) = Beta*nRb(1:n)
 
             !-----------------------Get the Local Solution for the Non-Linear Term----------
-            CALL GetScalarLocalSolution(Flux)
+            !CALL GetScalarLocalSolution(Flux)
+            !Use Advect-React Solver's method to get the local solution, as was done to limit
+            !Variable Values.
+            DO i = 1,n
+                Flux(i) = Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) )
+            END DO
 
             !---------------------Non-linear Term---------------------------------------------------------
             DO i = 1,n
