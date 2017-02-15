@@ -277,13 +277,13 @@ SUBROUTINE SEOPSolver( Model,Solver,dt,Transient )
             !CALL GetScalarLocalSolution(Flux)
             !Use Advect-React Solver's method to get the local solution, as was done to limit
             !Variable Values.
+
             DO i = 1,n
                 Flux(i) = Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) )
             END DO
 
             !---------------------Non-linear Term---------------------------------------------------------
             DO i = 1,n
-                !IF(Flux(i)<0) Flux(i) = 0 !To prevent non-physical values of the photon flux
                 RbPol_Term(i) = (1.)-(Flux(i)/(Flux(i)+spin_destruction(i)))
                 Absorption_Term(i) = Absorption_Term(i)*RbPol_Term(i)
             END DO
