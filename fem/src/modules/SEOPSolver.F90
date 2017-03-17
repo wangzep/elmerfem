@@ -40,7 +40,7 @@
 !> A prototype solver that heavily relies on the Advection-Reaction Solver code
 !> to solver for laser absorption in SEOP processes.
 !>  Advection-reaction equation solver for scalar fields with discontinous Galerkin method.
-!> \ingroup Solvers
+!> \ingroup Solvers. Stable Verision.
 !------------------------------------------------------------------------------
 SUBROUTINE SEOPSolver( Model,Solver,dt,Transient )
     !------------------------------------------------------------------------------
