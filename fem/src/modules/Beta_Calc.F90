@@ -9,7 +9,7 @@
 !This function will get the Rubidium parameters from the SIF file and return
 !the Beta parameter. It encodes equation (A7)-(A10) from Fink et al.
 
-FUNCTION BetaCalc(Model, n) RESULT(Beta)
+FUNCTION BetaCalc(Model, n, T) RESULT(initopt)
     USE DefUtils
     IMPLICIT NONE
     TYPE(Model_t) :: Model
@@ -22,14 +22,15 @@ FUNCTION BetaCalc(Model, n) RESULT(Beta)
         absorb_laser_ratio,laser_frequency,&
         rubidium_frequency, laser_freq_width,&
         rubidium_freq_width, rubidium_wavelength,w_prime, w_dprime,&
-        w_input_real,w_input_imaginary, Beta(n)
+        w_input_real,w_input_imaginary, Beta, power, area, initopt, h, T
     LOGICAL :: FLAG, Found
     !------------------------------------------------------------------------!
     !Declare constants-------------------------------------------------------
         TWO = 2.0D0
-        C = 299792458.0D0
+        C = 299792458.0D0 !speed of light in m/s
         LOG2 = LOG(TWO)
-        electron_radius = 2.8179403267e-15
+        electron_radius = 2.8179403267e-15 !electron radius in m
+        h = 6.62607004D-34
     !-------------------------------------------------------------------------
 
     !Get the information about the rubidium and the laser from the SIF
@@ -41,6 +42,8 @@ FUNCTION BetaCalc(Model, n) RESULT(Beta)
     laser_linewidth = GetConstReal(Model % Constants,'laser line width',Found)
     rubidium_freq_width = GetConstReal(Model % Constants,'rubidium frequency width',Found)
     oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
+    power = GetConstReal(Model % Constants, 'laser power', Found)
+    area = GetConstReal(Model % Constants, 'laser area', Found)
 
         !For testing---------------------------------!!!!!!!!!!!!!!!!!!!!!!!
     !rubidium_wavelength = 800e-9
@@ -82,8 +85,16 @@ FUNCTION BetaCalc(Model, n) RESULT(Beta)
 
     !print *,'wprime',w_prime
 
-    Beta(1:n) = 2*DSQRT(PI*LOG2)*(electron_radius*oscillator_strength*&
+    Beta = 2*DSQRT(PI*LOG2)*(electron_radius*oscillator_strength*&
         laser_wavelength**2*w_prime)/laser_linewidth
+    !PRINT *,'Beta is', Beta
+    
+    initopt = Beta*power/(area*h*laser_frequency)
+    !PRINT *,'Power is', power
+    !PRINT *,'Area is', area
+    !PRINT *,'h is', h
+    !PRINT *,'Laser Frequency is', laser_frequency
+    !PRINT *,'Initial Optical Pumprate is', initopt
 
     RETURN
 
