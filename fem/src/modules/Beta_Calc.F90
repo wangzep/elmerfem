@@ -90,7 +90,12 @@ FUNCTION BetaCalc(Model, n, x) RESULT(initopt)
     Beta = 2*DSQRT(PI*LOG2)*(electron_radius*oscillator_strength*&
         laser_wavelength**2*w_prime)/laser_linewidth
     !PRINT *,'Beta is', Beta
-    initopt = Beta*power/(area*h*laser_frequency)*COS((pir**(3/2)*SQRT(x(1)**2 + x(2)**2))/(2*SQRT(area)))
+	!I added a cos term to assure that the laser optical pumping rate goes to zero at the boundaries
+	!of the laser beam area. I was getting some computational artifacts that appeared to be due to the 
+	!discontinity at the border.
+	!The factor of 3.14/2 is to account for the difference in area under the curve of a cos and a Heaviside
+	!function.
+    initopt = 3.14/2*Beta*power/(area*h*laser_frequency)*COS((3.14**(3/2)*SQRT(x(1)**2 + x(2)**2))/(SQRT(area)))
     !PRINT *,'Power is', power
     !PRINT *,'Area is', area
     !PRINT *,'h is', h
