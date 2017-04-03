@@ -1,0 +1,333 @@
+!!!!!!Input Parameters!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+$LaserPower = 75 !Laser power in watts                                                            !
+$BeamDiameter = 1.8 !Laser beam diameter in centimeters (make sure this matches your geometry!!!)    !
+$LaserSpectralWidth = 0.3 !Beam spectral width in nanometers                                       !
+$XeFrac = 0.01 !Fraction of gas mixture that is xenon; balance is assumed to be helium              !
+$N2Frac = 0.10 !Fraction of gas mixture that is nitrogen; balance is assumed to be helium           !
+$CellT1 = 20 !Cell relaxation time in minutes                                                        !
+$BodyTemp = 155 !Body temperature of cell in Celius                                                 !
+$Pres = 73 !Cell outlet pressure in psig                                                            !
+$FRate = 0.2 !Total flow rate in Standard Liters per Minute                                         !
+$InletDiameter = 7.9 !Inlet tube diameter in millimeters (make sure this matches your geometry)     !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+!!!!!!!!!!!!!!!!Parameter Functions and Conversions(Don't Change Unless You Know What You Are Doing)!
+
+!Pressure in Pascal (needed for Navier-Stokes calculation)
+$presconv = (14.7+Pres)*6894.76
+
+!Inlet velocity in m/s. I'm pretty sure this is right. See the link to the 
+!Maple worksheet in the documentation.
+$inletvelocity = 21.22065907*FRate/((1+0.6802721088e-1*Pres)*InletDiameter^2)
+
+!Rubidium Spin Destruction Rate
+!rubidium-rubidium spin destruction term in m^3/(kg*s). See my notes.
+
+$function rubidiumspindestructionrate(con) import Pres, XeFrac, N2Frac, BodyTemp {\
+rubidiumterm = 2.746877211e5*con;\
+atm = (14.7+Pres)/14.7;\
+n2den = atm*N2Frac;\
+heden = atm*(1-N2Frac-XeFrac);\
+xeden = atm*XeFrac;\
+n2term = 170*(1+(BodyTemp-90)/194.36)*n2den;\
+heterm = 24.6*(1+(BodyTemp-90)/94.6)*heden;\
+xeterm = 2.44e5*xeden;\
+xemolcterm = 6469/(XeFrac+1.1*N2Frac+3.2*(1-N2Frac-XeFrac));\
+_rubidiumspindestructionrate = rubidiumterm+n2term+heterm+xeterm+xemolcterm;\
+}
+
+!Spin-Exchange Term in m^3/(kg*s)
+$function spinexchangerate(con){\
+_spinexchangerate = 2.1129837e3*con;\
+}
+
+!Spin-Relaxation Rate
+$spinrelaxationrate = 1/(CellT1*60)
+
+!Rubidium Vapor Pressure in kg/m^3
+$rubidiumvaporpressure = 10^(10.55-4132/(BodyTemp+273.15))/(1.38e-16*(BodyTemp+273.15))/7.0432749e18
+
+!Area of beam
+$area = 3.14*(BeamDiameter*10^(-2))^2
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+Header
+  CHECK KEYWORDS Warn
+  Mesh DB "." "."
+  Include Path ""
+  Results Directory ""
+End
+
+Simulation
+  Max Output Level = 4
+  Coordinate System = Cartesian
+  Coordinate Mapping(3) = 1 2 3
+  Simulation Type = Steady state
+  Steady State Max Iterations = 1
+  Output Intervals = 1
+  Timestepping Method = BDF
+  BDF Order = 1
+  Solver Input File = XePolSif.sif
+  Post File = XePolIntProperRealistic.vtu
+End
+
+Constants
+  Gravity(4) = 0 -1 0 9.82
+  Stefan Boltzmann = 5.67e-08
+  Permittivity of Vacuum = 8.8542e-12
+  Boltzmann Constant = 1.3807e-23
+  Unit Charge = 1.602e-19
+  
+  !For SEOPSolver and BetaCalc
+  rubidium wavelength = Real 794.7e-9
+  rubidium frequency width = Real 126.65e9
+  laser wavelength = Real 795e-9
+  laser line width = Real $LaserSpectralWidth*10^(-9)
+  oscillator strength = Real .33333333333333333
+  laser area = Real $area
+  laser power = Real $LaserPower
+End
+
+Body 1
+  Target Bodies(1) = 1
+  Name = "Body Property 1"
+  Equation = 2
+  Material = 1
+  Initial condition = 2
+  Body Force = 1
+End
+
+Body 2
+  Target Bodies(1) = 2
+  Name = "Body 2"
+  Equation = 1
+  Material = 1
+  Body Force = 1
+  Initial condition = 1
+End
+
+Solver 1
+  Equation = Navier-Stokes
+  Procedure = "FlowSolve" "FlowSolver"
+  Variable = Flow Solution[Velocity:3 Pressure:1]
+  Exec Solver = Always
+  Stabilize = True
+  Bubbles = False
+  Lumped Mass Matrix = False
+  Optimize Bandwidth = True
+  Steady State Convergence Tolerance = 1.0e-9
+  Nonlinear System Convergence Tolerance = 1e-9
+  Nonlinear System Max Iterations = 500
+  Nonlinear System Newton After Iterations = 600
+  Nonlinear System Newton After Tolerance = 1.0e-12
+  Nonlinear System Relaxation Factor = 1.0
+  Linear System Solver = Iterative
+  Linear System Iterative Method = BiCGStabl
+  Linear System Max Iterations = 1000
+  Linear System Convergence Tolerance = 1e-12
+  BiCGstabl polynomial degree = 2
+  Linear System Preconditioning = ILU1
+  Linear System ILUT Tolerance = 1.0e-3
+  Linear System Abort Not Converged = False
+  Linear System Residual Output = 1
+  Linear System Precondition Recompute = 1
+End
+
+Solver 2
+  Equation = Advection Diffusion Equation
+  Variable = Concentration
+  Procedure = "AdvectionDiffusion" "AdvectionDiffusionSolver"
+  Exec Solver = Always
+  Stabilize = True
+  Bubbles = False
+  Lumped Mass Matrix = False
+  Optimize Bandwidth = True
+  Steady State Convergence Tolerance = 1.0e-5
+  Nonlinear System Convergence Tolerance = 1.0e-7
+  Nonlinear System Max Iterations = 1
+  Nonlinear System Newton After Iterations = 3
+  Nonlinear System Newton After Tolerance = 1.0e-3
+  Nonlinear System Relaxation Factor = 1
+  Linear System Solver = Iterative
+  Linear System Iterative Method = BiCGStab
+  Linear System Max Iterations = 500
+  Linear System Convergence Tolerance = 1.0e-7
+  BiCGstabl polynomial degree = 2
+  Linear System Preconditioning = ILU0
+  Linear System ILUT Tolerance = 1.0e-3
+  Linear System Abort Not Converged = True
+  Linear System Residual Output = 1
+  Linear System Precondition Recompute = 1
+End
+
+Solver 3
+  Equation = SEOPSolverNew
+  Discontinuous Galerkin = True
+  Exported Variable 1 = Flux
+  Variable = -nooutput DGFlux
+  Limit Solution = True
+  Procedure = "SEOPSolverNew" "SEOPSolver"
+  Exec Solver = Always
+  Stabilize = True
+  Bubbles = False
+  Lumped Mass Matrix = False
+  Optimize Bandwidth = True
+  Steady State Convergence Tolerance = 1.0e-5
+  Nonlinear System Convergence Tolerance = 1.0e-4
+  Nonlinear System Max Iterations = 500
+  Nonlinear System Newton After Iterations = 1000
+  Nonlinear System Newton After Tolerance = 1.0e-10
+  Nonlinear System Relaxation Factor = 1
+  Linear System Solver = Iterative
+  Linear System Iterative Method = BiCGStab
+  Linear System Max Iterations = 1000
+  Linear System Convergence Tolerance = 1.0e-4
+  BiCGstabl polynomial degree = 2
+  Linear System Preconditioning = ILU1
+  Linear System ILUT Tolerance = 1.0e-3
+  Linear System Abort Not Converged = False
+  Linear System Residual Output = 1
+  Linear System Precondition Recompute = 1
+End
+
+Solver 4
+  Equation = XePolarization
+  Discontinuous Galerkin = True
+  Exported Variable 1 = XePolarization
+  Variable = -nooutput DGXePolarization
+  Limit Solution = True
+  Procedure = "AdvectionReaction" "AdvectionReactionSolver"
+  Exec Solver = Always
+  Stabilize = True
+  Bubbles = False
+  Lumped Mass Matrix = False
+  Optimize Bandwidth = True
+  Steady State Convergence Tolerance = 1.0e-5
+  Nonlinear System Convergence Tolerance = 1.0e-5
+  Nonlinear System Max Iterations = 1
+  Nonlinear System Newton After Iterations = 1000
+  Nonlinear System Newton After Tolerance = 1.0e-10
+  Nonlinear System Relaxation Factor = 1
+  Linear System Solver = Iterative
+  Linear System Iterative Method = BiCGStab
+  Linear System Max Iterations = 10000
+  Linear System Convergence Tolerance = 1.0e-7
+  BiCGstabl polynomial degree = 2
+  Linear System Preconditioning = ILU1
+  Linear System ILUT Tolerance = 1.0e-3
+  Linear System Abort Not Converged = True
+  Linear System Residual Output = 1
+  Linear System Precondition Recompute = 1 
+End
+
+Equation 1
+  Name = "LaserRegion"
+  Concentration Units = Absolute Mass
+  Concentration Convection = Computed
+  Convection = String Computed
+  Flow Solution Name = String Flow Solution
+  Active Solvers(4) = 1 2 3 4
+End
+
+Equation 2
+  Name = "CellRegion"
+  Concentration Units = Absolute Mass
+  Concentration Convection = Computed
+  Convection = String Computed
+  Flow Solution Name = String Flow Solution
+  Active Solvers(3) = 1 2 4
+End
+
+Material 1
+  Name = "Air (room temperature)"
+  Concentration Diffusivity = 3.9e-5
+  Reference Temperature = 300
+  Heat expansion Coefficient = 3.43e-3
+  Viscosity = 1.983e-5
+  Compressibility Model = Aritificial Compressibile
+  Laser Direction 1 = 0
+  Reference Pressure = 3e5
+  Spin Destruction Rate = Variable Concentration; MATC "rubidiumspindestructionrate(tx)"
+  Rubidium Number Density = Variable Concentration;MATC "7.043279e24*tx"
+  Laser Direction 2 = 0
+  Laser Direction  3 = -1
+  Specific Heat Ratio = 5/3
+  Heat Conductivity = 0.0257
+  Relative Permittivity = 1.00059
+  Sound speed = 343.0
+  Heat Capacity = 1005.0
+  Density = 1.205
+  Relative Permeability = 1.00000037
+  DGFlux Lower Limit = 1e-2
+  DGFlux Upper Limit = 1e7!Real Procedure "BetaCalc" "BetaCalc"
+  DGXePolarization Lower Limit = Real 0
+  DGXePolarization Upper Limit = Real 1
+  DGXePolarization Gamma = Variable Concentration;Real MATC "spinexchangerate(tx)+spinrelaxationrate"
+End
+
+Body Force 1
+  Name = "BodyForce 1"
+  DGFlux Source = 0
+  DGXePolarization Source =  Variable DGFlux,Concentration;Real MATC "spinexchangerate(tx(1))*(tx(0)/(rubidiumspindestructionrate(tx(1))+tx(0)))"
+End
+
+Initial Condition 1
+  Name = "ICLaser"
+  Velocity 2 = 0
+  Pressure = $presconv
+  Concentration = 1e-10
+  DGFlux = 1e4
+  Velocity 1 = 0
+  Velocity 3 = 0
+  DGXePolarization = Real 0
+End
+
+Initial Condition 2
+  Name = "ICCell"
+  Velocity 2 = 0
+  Pressure = $presconv
+  Concentration = 1e-10
+  Velocity 1 = 0
+  Velocity 3 = 0
+  DGXePolarization = Real 0
+End
+
+Boundary Condition 1
+  Target Boundaries(1) = 4 
+  Name = "LaserWall"
+  Noslip wall BC = True
+  DGFlux = Variable Coordinate; Real Procedure "Beta_Calc" "BetaCalc"
+  Concentration Flux = 0
+End
+
+Boundary Condition 2
+  Target Boundaries(1) = 2 
+  Name = "Inlet"
+  Velocity 3 = 0
+  Velocity 1 = $inletvelocity
+  Velocity 2 = 0
+  Concentration = 1e-10
+  DGXePolarization = Real 0
+End
+
+Boundary Condition 3
+  Target Boundaries(1) = 3 
+  Name = "Outlet"
+  External Pressure = $-presconv
+End
+
+Boundary Condition 4
+  Target Boundaries(1) = 6 
+  Name = "Walls"
+  Noslip wall BC = True
+  Concentration Flux = 0
+End
+
+Boundary Condition 5
+  Target Boundaries(1) = 1 
+  Name = "Rb Wall"
+  Concentration = $rubidiumvaporpressure
+  Noslip wall BC = True
+End
