@@ -302,11 +302,11 @@
        at  = CPUTime()
        at0 = RealTime()
 
-       CALL Info( 'AdvectionDiffusion', &
+       CALL Info( 'XePol', &
              '-------------------------------------', Level=4 )
        WRITE( Message, * ) 'Iteration step: ', iter
-       CALL Info( 'AdvectionDiffusion', Message, Level=4 )
-       CALL Info( 'AdvectionDiffusion', &
+       CALL Info( 'XePol', Message, Level=4 )
+       CALL Info( 'XePol', &
              '-------------------------------------', Level=4 )
 
 !------------------------------------------------------------------------------
@@ -319,7 +319,7 @@
 !------------------------------------------------------------------------------
 
        tmax = Solver % NumberOfActiveElements
-       CALL Info( 'AdvectionDiffusion','Bulk Assembly')
+       CALL Info( 'XePol','Bulk Assembly')
  
        DO t = 1, tmax
 
@@ -370,7 +370,7 @@
              ELSE
                WRITE( Message, * ) 'No temperature variable ' &
                    // TRIM( HeatSolName ) // ' available'
-               CALL Fatal( 'AdvectionDiffusion', Message )
+               CALL Fatal( 'XePol', Message )
              END IF
            END IF
 
