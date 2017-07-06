@@ -44,7 +44,7 @@
 !> \{
 
 !------------------------------------------------------------------------------
-!> Initialization of the main solver: AdvectionDiffusionSolver
+!> Initialization of the main solver: XePolSolver
 !------------------------------------------------------------------------------
    SUBROUTINE XePol_init( Model,Solver,Timestep,TransientSimulation )
 !------------------------------------------------------------------------------
@@ -63,7 +63,7 @@
      Params => GetSolverParams()
      CALL ListAddInteger( Params,'Time Derivative Order', 1 )
 
-   END SUBROUTINE AdvectionDiffusionSolver_init
+   END SUBROUTINE XePolSolver_init
 
 
 
@@ -326,7 +326,7 @@
          IF ( RealTime() - at0 > 1.0 ) THEN
            WRITE(Message,'(a,i3,a)' ) '   Assembly: ', &
                INT(100.0 - 100.0 * (tmax-t) / (1.0*tmax)), ' % done'           
-           CALL Info( 'AdvectionDiffusion', Message, Level=5 )             
+           CALL Info( 'XePol', Message, Level=5 )
            at0 = RealTime()
          END IF
          
@@ -389,7 +389,7 @@
              ELSE
                WRITE( Message, * ) 'No electrical potential variable ' &
                    // TRIM( PhiSolName ) // ' available'
-               CALL Fatal( 'AdvectionDiffusion', Message )
+               CALL Fatal( 'XePol', Message )
              END IF
            END IF
 
@@ -409,7 +409,7 @@
              ELSE
                WRITE( Message, * ) 'No convection  variable ' // &
                    TRIM( ConvectName ) // ' available'
-               CALL Fatal( 'AdvectionDiffusion', Message )
+               CALL Fatal( 'XePol', Message )
              END IF
            END IF
 
@@ -657,7 +657,7 @@
             IF ( .NOT. GotIT ) THEN
                WRITE( Message, * ) 'Maximum solubility not defined in body : ', &
                     CurrentElement % BodyId
-               CALL Fatal( 'AdvectionDiffusion', Message )
+               CALL Fatal( 'XePol', Message )
             END IF
             C0 = C0 / MaxSol
          END IF
@@ -687,7 +687,7 @@
              IF ( .NOT. GotIT ) THEN
                WRITE( Message, * ) 'Maximum solubility not defined in body : ', &
                    CurrentElement % BodyId
-               CALL Fatal( 'AdvectionDiffusion', Message )
+               CALL Fatal( 'XePol', Message )
              END IF
            ELSE
              Ratio = 1.0d0
@@ -750,7 +750,7 @@
 !------------------------------------------------------------------------------
 
        IF ( ScaledToSolubility ) THEN
-         CALL Info( 'AdvectionDiffusion', 'Mixed bulk-boundary assembly')
+         CALL Info( 'XePol', 'Mixed bulk-boundary assembly')
 
 
          DO t=Mesh % NumberOfBulkElements + 1, &
@@ -836,7 +836,7 @@
            
            IF ( .NOT. GotIT ) THEN
              WRITE( Message, * ) 'No maximum solubility defined for material : ', k
-             CALL Fatal( 'AdvectionDiffusion', Message )
+             CALL Fatal( 'XePol', Message )
            END IF
            
            IF ( lbody == body_id ) THEN
@@ -855,7 +855,7 @@
            
            IF ( .NOT. GotIT ) THEN
              WRITE( Message, * ) 'No maximum solubility defined for material : ', k
-             CALL Fatal( 'AdvectionDiffusion', Message )
+             CALL Fatal( 'XePol', Message )
            END IF
            Ratio = Ratio - 1.0d0
            
@@ -918,7 +918,7 @@
 !------------------------------------------------------------------------------
 !     Boundary element assembly
 !------------------------------------------------------------------------------
-       CALL Info( 'AdvectionDiffusion','Boundary Assembly')
+       CALL Info( 'XePol','Boundary Assembly')
        
        ErrorWritten = .FALSE.
        DO t=Mesh % NumberOfBulkElements + 1, &
@@ -962,12 +962,12 @@
                 
                 IF ( .NOT. AbsoluteMass .OR. ScaledToSolubility ) THEN
                   IF ( .NOT. ErrorWritten ) THEN
-                    CALL Error( 'AdvectionDiffusion', '--------------------' )
-                    CALL Error( 'AdvectionDiffusion', &
+                    CALL Error( 'XePol', '--------------------' )
+                    CALL Error( 'XePol', &
                         'Mass transfer coefficient possible to use only with absolute mass concentrations' )
-                    CALL Error( 'AdvectionDiffusion', &
+                    CALL Error( 'XePol', &
                         'Ignoring mass transfer BC' )
-                    CALL Error( 'AdvectionDiffusion', '--------------------' )
+                    CALL Error( 'XePol', '--------------------' )
                     ErrorWritten = .TRUE.
                   END IF
                   SExt = 0.0d0
@@ -997,7 +997,7 @@
                 IF ( .NOT. GotIT ) THEN
                   WRITE( Message, * ) 'No maximum solubility defined in body : ', &
                       CurrentElement % BodyId
-                  CALL Fatal( 'AdvectionDiffusion', Message )
+                  CALL Fatal( 'XePol', Message )
                 END IF
               ELSE
                 Ratio = 1.0d0
@@ -1046,7 +1046,7 @@
       CALL DefaultDirichletBCs()
 
 !------------------------------------------------------------------------------
-      CALL Info( 'AdvectionDiffusion', 'Assembly done')
+      CALL Info( 'XePol', 'Assembly done')
 
       at = CPUTime() - at
       st = CPUTime()
@@ -1061,16 +1061,16 @@
       totat = totat + at
       totst = totst + st
       WRITE(Message,'(a,i4,a,F8.2,F8.2)') 'iter: ',iter,' Assembly: (s)', at, totat
-      CALL Info( 'AdvectionDiffusion', Message, Level=5 )
+      CALL Info( 'XePol', Message, Level=5 )
       WRITE(Message,'(a,i4,a,F8.2,F8.2)') 'iter: ',iter,' Solve:    (s)', st, totst
-      CALL Info( 'AdvectionDiffusion', Message, Level=5 )
+      CALL Info( 'XePol', Message, Level=5 )
 !------------------------------------------------------------------------------
       RelativeChange = Solver % Variable % NonlinChange 
 
       WRITE( Message, * ) 'Result Norm   : ',Norm
-      CALL Info( 'AdvectionDiffusion', Message, Level=4 )
+      CALL Info( 'XePol', Message, Level=4 )
       WRITE( Message, * ) 'Relative Change : ',RelativeChange
-      CALL Info( 'AdvectionDiffusion', Message, Level=4 )
+      CALL Info( 'XePol', Message, Level=4 )
 
       IF ( Solver % Variable % NonlinConverged == 1 ) EXIT
 
@@ -2173,7 +2173,7 @@ CONTAINS
                GradTemp(i) = SUM( dBasisdx(1:n,i) * Temperature(1:n) )
              END DO
            ELSE
-             CALL Error( 'AdvectionDiffusion', &
+             CALL Error( 'XePol', &
                  'Thermal diffusion not implemented for this coordinate system. Ignoring it.' )
            END IF
 
@@ -2450,7 +2450,7 @@ CONTAINS
   END SUBROUTINE DiffuseConvectiveGenBoundary
 !------------------------------------------------------------------------------
 
-END SUBROUTINE AdvectionDiffusionSolver
+END SUBROUTINE XePolSolver
 !------------------------------------------------------------------------------
 
 !> \}
