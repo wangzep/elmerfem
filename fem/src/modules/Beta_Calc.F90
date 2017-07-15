@@ -7,7 +7,7 @@
 !User defined function used in conjuction with SEOPLaser.F90. This function
 !calculates the Beta parameter of the PDE presented in Fink et al. PRA 72 (2005)
 !This function will get the Rubidium parameters from the SIF file and return
-!the Beta parameter. It encodes equation (A7)-(A10) from Fink et al.
+!the initial pump rate. It encodes equation (A7)-(A11) from Fink et al.
 
 FUNCTION BetaCalc(Model, n, x) RESULT(initopt)
     USE DefUtils

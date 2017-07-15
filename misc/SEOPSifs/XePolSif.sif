@@ -163,12 +163,12 @@ Solver 2
 End
 
 Solver 3
-  Equation = SEOPSolverNew
+  Equation = SEOPSolver
   Discontinuous Galerkin = True
   Exported Variable 1 = Flux
   Variable = -nooutput DGFlux
   Limit Solution = True
-  Procedure = "SEOPSolverNew" "SEOPSolver"
+  Procedure = "SEOPSolver" "SEOPSolver"
   Exec Solver = Always
   Stabilize = True
   Bubbles = False
