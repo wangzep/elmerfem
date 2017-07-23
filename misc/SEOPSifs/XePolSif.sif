@@ -192,35 +192,63 @@ Solver 3
   Linear System Precondition Recompute = 1
 End
 
+
 Solver 4
   Equation = XePolarization
-  Discontinuous Galerkin = True
-  Exported Variable 1 = XePolarization
-  Variable = -nooutput DGXePolarization
-  Limit Solution = True
-  Procedure = "AdvectionReaction" "AdvectionReactionSolver"
+  Variable = XePolarization
+  Procedure = "XePolarization" "XePolarization"
   Exec Solver = Always
   Stabilize = True
   Bubbles = False
   Lumped Mass Matrix = False
   Optimize Bandwidth = True
   Steady State Convergence Tolerance = 1.0e-5
-  Nonlinear System Convergence Tolerance = 1.0e-5
+  Nonlinear System Convergence Tolerance = 1.0e-7
   Nonlinear System Max Iterations = 1
-  Nonlinear System Newton After Iterations = 1000
-  Nonlinear System Newton After Tolerance = 1.0e-10
+  Nonlinear System Newton After Iterations = 3
+  Nonlinear System Newton After Tolerance = 1.0e-3
   Nonlinear System Relaxation Factor = 1
   Linear System Solver = Iterative
   Linear System Iterative Method = BiCGStab
-  Linear System Max Iterations = 10000
+  Linear System Max Iterations = 500
   Linear System Convergence Tolerance = 1.0e-7
   BiCGstabl polynomial degree = 2
   Linear System Preconditioning = ILU1
   Linear System ILUT Tolerance = 1.0e-3
   Linear System Abort Not Converged = True
   Linear System Residual Output = 1
-  Linear System Precondition Recompute = 1 
+  Linear System Precondition Recompute = 1
 End
+
+!Solver 4
+!  Equation = XePolarization
+!  Discontinuous Galerkin = True
+!  Exported Variable 1 = XePolarization
+!  Variable = -nooutput DGXePolarization
+!  Limit Solution = True
+!  Procedure = "AdvectionReaction" "AdvectionReactionSolver"
+!  Exec Solver = Always
+!  Stabilize = True
+!  Bubbles = False
+!  Lumped Mass Matrix = False
+!  Optimize Bandwidth = True
+!  Steady State Convergence Tolerance = 1.0e-5
+!  Nonlinear System Convergence Tolerance = 1.0e-5
+!  Nonlinear System Max Iterations = 1
+!  Nonlinear System Newton After Iterations = 1000
+!  Nonlinear System Newton After Tolerance = 1.0e-10
+!  Nonlinear System Relaxation Factor = 1
+!  Linear System Solver = Iterative
+!  Linear System Iterative Method = BiCGStab
+!  Linear System Max Iterations = 10000
+!  Linear System Convergence Tolerance = 1.0e-7
+!  BiCGstabl polynomial degree = 2
+!  Linear System Preconditioning = ILU1
+!  Linear System ILUT Tolerance = 1.0e-3
+!  Linear System Abort Not Converged = True
+!  Linear System Residual Output = 1
+!  Linear System Precondition Recompute = 1 
+!End
 
 Equation 1
   Name = "LaserRegion"
@@ -262,15 +290,19 @@ Material 1
   Relative Permeability = 1.00000037
   DGFlux Lower Limit = 1e-2
   DGFlux Upper Limit = 1e7!Real Procedure "BetaCalc" "BetaCalc"
-  DGXePolarization Lower Limit = Real 0
-  DGXePolarization Upper Limit = Real 1
-  DGXePolarization Gamma = Variable Concentration;Real MATC "spinexchangerate(tx)+spinrelaxationrate"
+  diffusion coefficient = 0.000006
+  reaction coefficient = Variable Concentration;Real MATC "spinexchangerate(tx)+spinrelaxationrate"
+  convection coefficient = 1
+  time derivative coefficient = 0
+  !DGXePolarization Lower Limit = Real 0
+  !DGXePolarization Upper Limit = Real 1
+  !DGXePolarization Gamma = Variable Concentration;Real MATC "spinexchangerate(tx)+spinrelaxationrate"
 End
 
 Body Force 1
   Name = "BodyForce 1"
   DGFlux Source = 0
-  DGXePolarization Source =  Variable DGFlux,Concentration;Real MATC "spinexchangerate(tx(1))*(tx(0)/(rubidiumspindestructionrate(tx(1))+tx(0)))"
+  Field Source =  Variable DGFlux,Concentration;Real MATC "spinexchangerate(tx(1))*(tx(0)/(rubidiumspindestructionrate(tx(1))+tx(0)))"
 End
 
 Initial Condition 1
@@ -281,7 +313,7 @@ Initial Condition 1
   DGFlux = 1e4
   Velocity 1 = 0
   Velocity 3 = 0
-  DGXePolarization = Real 0
+  XePolarization = Real 0
 End
 
 Initial Condition 2
@@ -291,7 +323,7 @@ Initial Condition 2
   Concentration = 1e-10
   Velocity 1 = 0
   Velocity 3 = 0
-  DGXePolarization = Real 0
+  XePolarization = Real 0
 End
 
 Boundary Condition 1
@@ -309,7 +341,7 @@ Boundary Condition 2
   Velocity 1 = $inletvelocity
   Velocity 2 = 0
   Concentration = 1e-10
-  DGXePolarization = Real 0
+  XePolarization = Real 0
 End
 
 Boundary Condition 3

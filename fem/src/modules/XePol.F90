@@ -63,7 +63,7 @@
      Params => GetSolverParams()
      CALL ListAddInteger( Params,'Time Derivative Order', 1 )
 
-   END SUBROUTINE XePolSolver_init
+   END SUBROUTINE XePol_init
 
 
 
@@ -116,8 +116,8 @@
                    C0(:),C1(:),CT(:),C2(:,:,:),LocalForce(:), TimeForce(:)
      CHARACTER(LEN=MAX_NAME_LEN) :: ConvectionFlag, HeatSolName, PhiSolName, ConvectName
 ! Use C1, C2 as in users guide:
-! Relative mass units: C1=Density, C2=Density*Diff, C0 = 0, Ct=C1
-! Absolute mass units: C1=1, C2=Diff, C0 = div v, Ct=1
+! Relative mass units: C1=Density, C2=Density*Diff, C0 = 0, Ct=C1,
+! Absolute mass units: C1=1, C2=Diff, C0 = reaction term, Ct=1, C3 = reaction
 ! Used to be for C_I, C_V
 ! Add C, when previous solution needed for linearization
      TYPE(Variable_t), POINTER :: TempSol,PhiSol,FlowSol,MeshSol
@@ -649,7 +649,8 @@
             END DO
          END IF
 
-         C0 = Density
+         !C0 = Density
+         C0 =  ListGetReal( Material,'Gamma',n,NodeIndexes )
          IF ( ScaledToSolubility ) THEN
             MaxSol = ListGetConstReal( Material, &
               TRIM(ComponentName(Solver % Variable)) // &
@@ -659,7 +660,7 @@
                     CurrentElement % BodyId
                CALL Fatal( 'XePol', Message )
             END IF
-            C0 = C0 / MaxSol
+            !C0 = C0 / MaxSol
          END IF
              
 
@@ -1231,7 +1232,7 @@ CONTAINS
         NPDiffusion = .TRUE.
         NodalCNP = NodalC0(1:n)
      END IF
-     NodalC0 = 0.0d0   ! this is the way it works, maybe could do better some time
+     !NodalC0 = 0.0d0   ! this is the way it works, maybe could do better some time
 
 !------------------------------------------------------------------------------
 !    Integration stuff
@@ -1282,7 +1283,6 @@ CONTAINS
        C1 = SUM( NodalC1(1:n) * Basis(1:n) )
        CT = SUM( NodalCT(1:n) * Basis(1:n) )
 
-
 !------------------------------------------------------------------------------
 !      Coefficient of the diffusion term & it s derivatives at the
 !      integration point
@@ -1320,7 +1320,7 @@ CONTAINS
             DO i=1,dim
               DivVelo = DivVelo + dVelodx(i,i)
             END DO
-            C0 = DivVelo
+            !C0 = DivVelo
           END IF
 
 !------------------------------------------------------------------------------
@@ -1873,7 +1873,7 @@ CONTAINS
         NPDiffusion = .TRUE.
         NodalCNP = NodalC0(1:n)
      END IF
-     NodalC0 = 0.0d0   ! this is the way it works, maybe could do better some time
+     !NodalC0 = 0.0d0   ! this is the way it works, maybe could do better some time
 
 !------------------------------------------------------------------------------
 !    Integration stuff
@@ -1994,7 +1994,7 @@ CONTAINS
                END DO
              END DO
            END IF
-           C0 = DivVelo
+           !C0 = DivVelo
          END IF
 
 !------------------------------------------------------------------------------
@@ -2450,7 +2450,7 @@ CONTAINS
   END SUBROUTINE DiffuseConvectiveGenBoundary
 !------------------------------------------------------------------------------
 
-END SUBROUTINE XePolSolver
+END SUBROUTINE XePol
 !------------------------------------------------------------------------------
 
 !> \}
