@@ -696,7 +696,7 @@
            Load(1:n) = Load(1:n) + &
                ListGetReal( Model % BodyForces(bf_id) % Values,  &
                TRIM(ComponentName(Solver % Variable)) // &
-                 ' Diffusion Source',n,NodeIndexes,gotIt ) / Ratio
+                 ' Field Source',n,NodeIndexes,gotIt ) / Ratio
          END IF
 
 !------------------------------------------------------------------------------

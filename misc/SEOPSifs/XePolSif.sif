@@ -194,9 +194,9 @@ End
 
 
 Solver 4
-  Equation = XePolarization
-  Variable = XePolarization
-  Procedure = "XePolarization" "XePolarization"
+  Equation = XePo
+  Variable = XePol
+  Procedure = "XePol" "XePol"
   Exec Solver = Always
   Stabilize = True
   Bubbles = False
@@ -213,7 +213,7 @@ Solver 4
   Linear System Max Iterations = 500
   Linear System Convergence Tolerance = 1.0e-7
   BiCGstabl polynomial degree = 2
-  Linear System Preconditioning = ILU1
+  Linear System Preconditioning = ILU0
   Linear System ILUT Tolerance = 1.0e-3
   Linear System Abort Not Converged = True
   Linear System Residual Output = 1
@@ -271,6 +271,7 @@ End
 Material 1
   Name = "Air (room temperature)"
   Concentration Diffusivity = 3.9e-5
+  XePol Diffusivity = 3.9e-5
   Reference Temperature = 300
   Heat expansion Coefficient = 3.43e-3
   Viscosity = 1.983e-5
@@ -296,13 +297,13 @@ Material 1
   time derivative coefficient = 0
   !DGXePolarization Lower Limit = Real 0
   !DGXePolarization Upper Limit = Real 1
-  !DGXePolarization Gamma = Variable Concentration;Real MATC "spinexchangerate(tx)+spinrelaxationrate"
+  Gamma = Variable Concentration;Real MATC "spinexchangerate(tx)+spinrelaxationrate"
 End
 
 Body Force 1
   Name = "BodyForce 1"
   DGFlux Source = 0
-  Field Source =  Variable DGFlux,Concentration;Real MATC "spinexchangerate(tx(1))*(tx(0)/(rubidiumspindestructionrate(tx(1))+tx(0)))"
+  XePol Field Source =  Variable DGFlux,Concentration;Real MATC "spinexchangerate(tx(1))*(tx(0)/(rubidiumspindestructionrate(tx(1))+tx(0)))"
 End
 
 Initial Condition 1
@@ -313,7 +314,7 @@ Initial Condition 1
   DGFlux = 1e4
   Velocity 1 = 0
   Velocity 3 = 0
-  XePolarization = Real 0
+  XePol = Real 0
 End
 
 Initial Condition 2
@@ -323,7 +324,7 @@ Initial Condition 2
   Concentration = 1e-10
   Velocity 1 = 0
   Velocity 3 = 0
-  XePolarization = Real 0
+  XePol = Real 0
 End
 
 Boundary Condition 1
@@ -341,7 +342,7 @@ Boundary Condition 2
   Velocity 1 = $inletvelocity
   Velocity 2 = 0
   Concentration = 1e-10
-  XePolarization = Real 0
+  XePol = Real 0
 End
 
 Boundary Condition 3
