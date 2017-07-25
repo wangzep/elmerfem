@@ -271,7 +271,7 @@ End
 Material 1
   Name = "Air (room temperature)"
   Concentration Diffusivity = 3.9e-5
-  XePol Diffusivity = 3.9e-5
+  XePol Diffusivity = Real 8.7e-5
   Reference Temperature = 300
   Heat expansion Coefficient = 3.43e-3
   Viscosity = 1.983e-5
