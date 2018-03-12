@@ -124,6 +124,7 @@ MODULE DiffuseConvectiveGeneral
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t), POINTER :: Element
 
+     
 !------------------------------------------------------------------------------
 !    Local variables
 !------------------------------------------------------------------------------
@@ -148,19 +149,22 @@ MODULE DiffuseConvectiveGeneral
 
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
 
-     REAL(KIND=dp) :: C0,CT,C1,C2(3,3),dC2dx(3,3,3),SU(n),SW(n),Density
+     REAL(KIND=dp) :: C0,CT,CL,C1,C2(3,3),dC2dx(3,3,3),SU(n),SW(n),Density
 
      TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
 
      LOGICAL :: stat,CylindricSymmetry,Convection,ConvectAndStabilize,Bubbles, &
                FrictionHeat, Found
-     TYPE(ValueList_t), POINTER :: BodyForce
+     TYPE(ValueList_t), POINTER :: BodyForce, Material
 
+     LOGICAL :: GotCondModel
+   
 !------------------------------------------------------------------------------
 
      CylindricSymmetry = (CurrentCoordinateSystem() == CylindricSymmetric .OR. &
                   CurrentCoordinateSystem() == AxisSymmetric)
 
+     
      IF ( CylindricSymmetry ) THEN
        dim = 3
      ELSE
@@ -181,6 +185,9 @@ MODULE DiffuseConvectiveGeneral
         Bubbles = .TRUE.
      END IF
      
+     Material => GetMaterial()
+     GotCondModel = ListCheckPresent( Material,'Heat Conductivity Model')
+     
 !------------------------------------------------------------------------------
 !    Integration stuff
 !------------------------------------------------------------------------------
@@ -197,7 +204,7 @@ MODULE DiffuseConvectiveGeneral
  
 !------------------------------------------------------------------------------
 !    Stabilization parameters: hK, mK (take a look at Franca et.al.)
-!    If there is no convection term we dont need stabilization.
+!    If there is no convection term we don't need stabilization.
 !------------------------------------------------------------------------------
      ConvectAndStabilize = .FALSE.
      IF ( Stabilize .AND. ANY(NodalC1 /= 0.0D0) ) THEN
@@ -265,7 +272,9 @@ MODULE DiffuseConvectiveGeneral
           dTemp = dTemp + SUM( Temperature(1:n) * dBasisdx(1:n,i) )**2
         END DO
 
-        CT = SQRT( dEnth / dTemp )
+        CL = SQRT( dEnth / dTemp )
+        
+        CT = CT + CL
       END IF
 !------------------------------------------------------------------------------
 !      Coefficient of the diffusion term & its derivatives at the
@@ -278,11 +287,13 @@ MODULE DiffuseConvectiveGeneral
                 SUM( NodalC2(i,j,1:n) * Basis(1:n) )
          END DO
        END DO
- 
-       DO i=1,dim
-          C2(i,i) = EffectiveConductivity( C2(i,i), Density, Element, &
-                 Temperature, UX,UY,UZ, Nodes, n, n, u, v, w )
-       END DO
+
+       IF( GotCondModel ) THEN
+         DO i=1,dim
+           C2(i,i) = EffectiveConductivity( C2(i,i), Density, Element, &
+               Temperature, UX,UY,UZ, Nodes, n, n, u, v, w )
+         END DO
+       END IF
 !------------------------------------------------------------------------------
 !      If there's no convection term we don't need the velocities, and
 !      also no need for stabilization
@@ -290,7 +301,7 @@ MODULE DiffuseConvectiveGeneral
        Convection = .FALSE.
        IF ( C1 /= 0.0D0 ) THEN
          Convection = .TRUE.
-         IF ( PhaseChange ) C1 = CT
+         IF ( PhaseChange ) C1 = C1 + CL
 !------------------------------------------------------------------------------
 !        Velocity and pressure (deviation) from previous iteration
 !        at the integration point

@@ -35,6 +35,52 @@
 ! *
 ! ****************************************************************************/
 
+
+
+SUBROUTINE AcousticsSolver_init( Model,Solver,dt,TransientSimulation )
+!------------------------------------------------------------------------------
+  USE DefUtils
+  IMPLICIT NONE
+!------------------------------------------------------------------------------
+  TYPE(Solver_t) :: Solver
+  TYPE(Model_t) :: Model
+  REAL(KIND=dp) :: dt
+  LOGICAL :: TransientSimulation
+!------------------------------------------------------------------------------
+! Local variables
+!------------------------------------------------------------------------------
+  TYPE(ValueList_t), POINTER :: Params
+  INTEGER :: dim
+
+  CALL Info('AcousticsSolver','Initialization the solver')
+  
+  Params => GetSolverParams()
+  CALL ListAddNewLogical( Params,'Linear System Complex',.TRUE.)
+
+  dim = CoordinateSystemDimension() 
+
+  IF( ListCheckPresent( Params,'Variable' ) ) THEN
+    CALL Warn('AcousticsSolver','Redefining variable name from the given one!')
+  END IF
+
+  ! Leave for now since the strings are too short
+  IF(.FALSE.) THEN
+    IF( dim == 2 ) THEN
+      CALL ListAddString( Params,'Variable',&
+          'Flow[Re Velocity 1:1 Im Velocity 1:1 Re Velocity 2:1 Im Velocity 2:1 '&
+          //' Re Temperature:1 Im Temperature:1 Re Pressure:1 Im Pressure]')
+    ELSE
+      CALL ListAddString( Params,'Variable',&
+          'Flow[Re Velocity 1:1 Im Velocity 1:1 Re Velocity 2:1 Im Velocity 2:1 Re Velocity 3:1 Im Velocity 3:1 '&
+          //' Re Temperature:1 Im Temperature:1 Re Pressure:1 Im Pressure:1]')
+    END IF
+  END IF
+    
+  
+END SUBROUTINE AcousticsSolver_init
+  
+  
+
 !-----------------------------------------------------------------------------
 !>  Solve the time-harmonic, generalized NS-equations assuming ideal gas law.
 !------------------------------------------------------------------------------
@@ -156,7 +202,7 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
   ! Get variables needed for solution
   !------------------------------------------------------------------------------
   IF ( .NOT. ASSOCIATED( Solver % Matrix ) ) RETURN
-  Solver % Matrix % COMPLEX = .TRUE.
+  !Solver % Matrix % COMPLEX = .TRUE.
 
   ! Nullify pointer
   HSol => Null()
@@ -503,8 +549,6 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
       !------------------------------------------------------------------------------
       ! Check that the dimension of element is suitable for BCs
       !------------------------------------------------------------------------------
-      IF( .NOT. PossibleFluxElement(CurrentElement) ) CYCLE
-
       n = CurrentElement % TYPE % NumberOfNodes
       NodeIndexes => CurrentElement % NodeIndexes
       IF (ANY(FlowPerm(NodeIndexes(1:n)) == 0)) CYCLE
@@ -626,7 +670,9 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
   CALL Info( 'AcousticsSolver', ' ', Level=4 )
   CALL Info( 'AcousticsSolver', 'Starting Assembly', Level=4 )
 
-  CALL InitializeToZero( StiffMatrix, ForceVector )
+  CALL DefaultStart()
+  CALL DefaultInitialize()
+  !InitializeToZero( StiffMatrix, ForceVector )
 
   !------------------------------------------------------------------------------
   DO t=1,Solver % NumberOfActiveElements
@@ -815,10 +861,6 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
     Model % CurrentElement => CurrentElement
 
     IF ( .NOT. ActiveBoundaryElement(CurrentElement, CurrentModel % Solver) ) CYCLE    
-    !------------------------------------------------------------------------------
-    ! Check that the dimension of element is suitable for BCs
-    !------------------------------------------------------------------------------
-    IF( .NOT. PossibleFluxElement(CurrentElement) ) CYCLE
 
     !------------------------------------------------------------------------------
     ! Extract the parent element to find its material parameters... 
@@ -1118,11 +1160,6 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
     IF ( .NOT. ActiveBoundaryElement(CurrentElement, CurrentModel% Solver) ) CYCLE    
 
     !------------------------------------------------------------------------------
-    ! Check that the dimension of element is suitable for BCs
-    !------------------------------------------------------------------------------
-    IF( .NOT. PossibleFluxElement(CurrentElement) ) CYCLE
-
-    !------------------------------------------------------------------------------
     ! Extract the parent element to find its material parameters... 
     !----------------------------------------------------------------------------- 
     n = CurrentElement % TYPE % NumberOfNodes
@@ -1268,8 +1305,10 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
       'Re Temperature', Dofs-3, Dofs, FlowPerm )
   CALL SetDirichletBoundaries( Model, StiffMatrix, ForceVector, & 
       'Im Temperature', Dofs-2, Dofs, FlowPerm )
-
+  
   IF(.TRUE.) CALL AcousticShellInterface()
+
+  CALL DefaultDirichletBCs()
   
   CALL Info( 'AcousticsSolver', 'Assembly done', Level=4 )
 
@@ -1316,11 +1355,6 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
        CurrentElement => Solver % Mesh % Elements(t)
        Model % CurrentElement => CurrentElement
        IF ( .NOT. ActiveBoundaryElement(CurrentElement, CurrentModel% Solver) ) CYCLE    
-
-       !------------------------------------------------------------------------------
-       ! Check that the dimension of element is suitable for BCs
-       !------------------------------------------------------------------------------
-       IF( .NOT. PossibleFluxElement(CurrentElement) ) CYCLE
 
        !------------------------------------------------------------------------------
        ! Extract the parent element to find its material parameters... 
@@ -1589,10 +1623,6 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
 
       CurrentElement => Solver % Mesh % Elements(t)
       Model % CurrentElement => CurrentElement
-      !------------------------------------------------------------------------------
-      ! Check that the dimension of element is suitable for BCs
-      !------------------------------------------------------------------------------
-      IF( .NOT. PossibleFluxElement(CurrentElement) ) CYCLE
 
       n = CurrentElement % TYPE % NumberOfNodes
       NodeIndexes => CurrentElement % NodeIndexes
@@ -1708,11 +1738,6 @@ SUBROUTINE AcousticsSolver( Model,Solver,dt,TransientSimulation )
     Model % CurrentElement => CurrentElement
 
     IF ( .NOT. ActiveBoundaryElement(CurrentElement, CurrentModel % Solver) ) CYCLE    
-
-    !------------------------------------------------------------------------------
-    ! Check that the dimension of element is suitable for BCs
-    !------------------------------------------------------------------------------
-    IF( .NOT. PossibleFluxElement(CurrentElement) ) CYCLE
 
     !------------------------------------------------------------------------------
     ! Extract the parent element to find its material parameters... 

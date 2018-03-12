@@ -100,7 +100,8 @@ static void Instructions()
   printf("17) .msh      : Nastran format\n");
   printf("18) .msh      : CGsim format\n");
   printf("19) .geo      : Geo format\n");
-  printf("20) .tra      : Cedrat Flux format\n");
+  printf("20) .tra      : Cedrat Flux 2D format\n");
+  printf("21) .pf3      : Cedrat Flux 3D format\n");
 #endif 
 
   printf("\nThe second parameter defines the output file format:\n");
@@ -137,6 +138,7 @@ static void Instructions()
   printf("-clone int[3]        : make ideantilcal copies of the mesh\n");
   printf("-clonesize real[3]   : the size of the mesh to be cloned if larger to the original\n");
   printf("-mirror int[3]       : copy the mesh around the origin in coordinate directions\n");
+  printf("-cloneinds           : when performing cloning should cloned entitities be given new indexes\n");
   printf("-unite               : the meshes will be united\n");
   printf("-polar real          : map 2D mesh to a cylindrical shell with given radius\n");
   printf("-cylinder            : map 2D/3D cylindrical mesh to a cartesian mesh\n");
@@ -160,40 +162,49 @@ static void Instructions()
   printf("-divlayer int[2] real[2]: make a boundary layer for given boundary\n");
   printf("-3d / -2d / -1d      : mesh is 3, 2 or 1-dimensional (applies to examples)\n");
   printf("-isoparam            : ensure that higher order elements are convex\n");
-  printf("-nobound             : disable saving of boundary elements in ElmerPost format\n");
+  printf("-nonames             : disable use of mesh.names even if it would be supported by the format\n");
   printf("-nosave              : disable saving part alltogether\n");
   printf("-nooverwrite         : if mesh already exists don't overwite it\n");
+  printf("-vtuone              : start real node indexes in vtu file from one\n");
   printf("-timer               : show timer information\n");
   printf("-infofile str        : file for saving the timer and size information\n");
 
-  printf("\nThe following keywords are related only to the parallel Elmer computations.\n");
-  printf("-partition int[4]    : the mesh will be partitioned in main directions\n");
-  printf("-partorder real[3]   : in the above method, the direction of the ordering\n");
+  printf("\nKeywords are related to mesh partitioning for parallel ElmerSolver runs:\n");
+  printf("-partition int[3]    : the mesh will be partitioned in cartesian main directions\n");
+  printf("-partorder real[3]   : in the 'partition' method set the direction of the ordering\n");
+  printf("-partcell int[3]     : the mesh will be partitioned in cells of fixed sizes\n");
+  printf("-partcyl int[3]      : the mesh will be partitioned in cylindrical main directions\n");
 #if PARTMETIS
-  printf("-metis int[2]        : the mesh will be partitioned with Metis\n");
+  printf("-metis int           : mesh will be partitioned with Metis using mesh routines\n");
+  printf("-metiskway int       : mesh will be partitioned with Metis using graph Kway routine\n");
+  printf("-metisrec int        : mesh will be partitioned with Metis using graph Recursive routine\n");
+  printf("-metiscontig         : enforce that the metis partitions are contiguous\n");
 #endif
-  printf("-partdual            : use the dual graph in the partitioning\n");
+  printf("-partdual            : use the dual graph in partition method (when available)\n");
   printf("-halo                : create halo for the partitioning for DG\n");
   printf("-halobc              : create halo for the partitioning at boundaries only\n");
-  printf("-haloz               : create halo for the the special z-partitioning\n");
-  printf("-indirect            : create indirect connections in the partitioning\n");
-  printf("-periodic int[3]     : decleare the periodic coordinate directions for parallel meshes\n");
-  printf("-partjoin int        : number of partitions in the data to be joined\n");
-  printf("-saveinterval int[3] : the first, last and step for fusing parallel data\n");
-  printf("-partorder real[3]   : in the above method, the direction of the ordering\n");
+  printf("-haloz / -halor      : create halo for the the special z- or r-partitioning\n");
+  printf("-indirect            : create indirect connections (102 elements) in the partitioning\n");
+  printf("-periodic int[3]     : periodic coordinate directions for parallel & conforming meshes\n");
   printf("-partoptim           : apply aggressive optimization to node sharing\n");
-  printf("-partbcoptim         : apply optimization to bc ownership sharing\n");
+  printf("-partnobcoptim       : do not apply optimization to bc ownership sharing\n");
   printf("-partbw              : minimize the bandwidth of partition-partion couplings\n");
   printf("-parthypre           : number the nodes continuously partitionwise\n");
-  printf("-partconnect         : partition connected BCs separately to partitions in z-direction\n");
+  printf("-partzbc             : partition connected BCs separately to partitions in Z-direction\n");
+  printf("-partrbc             : partition connected BCs separately to partitions in R-direction\n");
 #if PARTMETIS
-  printf("-metisconnect        : partition connected BCs separately to partitions by Metis\n");
+  printf("-metisbc             : partition connected BCs separately to partitions by Metis\n");
 #endif
-  printf("-partlayers          : extended boundary partitioning by element layers\n");
+  printf("-partlayers int      : extend boundary partitioning by element layers\n");
+  
+  printf("\nKeywords are related to (nearly obsolite) ElmerPost format:\n");
+  printf("-partjoin int        : number of ElmerPost partitions in the data to be joined\n");
+  printf("-saveinterval int[3] : the first, last and step for fusing parallel data\n");
+  printf("-nobound             : disable saving of boundary elements in ElmerPost format\n");
 
   if(0) printf("-names               : conserve name information where applicable\n");
 }
-
+ 
 
 static void Goodbye()
 {
@@ -229,10 +240,12 @@ int main(int argc, char *argv[])
 
   if(argc <= 1) {
     errorstat = LoadCommands(argv[1],&eg,grids,argc-1,info);     
-    Instructions();
-    if(errorstat) Goodbye();
+    if(errorstat) {
+      Instructions();
+      Goodbye();
+    }
   }
-  if(argc == 2) {
+  else if(argc == 2) {
     errorstat = LoadCommands(argv[1],&eg,grids,argc-1,info);     
     if(errorstat) Goodbye();
   }
@@ -303,7 +316,8 @@ int main(int argc, char *argv[])
       boundaries[nofile][i].created = FALSE; 
       boundaries[nofile][i].nosides = 0;
     }
-    if(LoadElmerInput(&(data[nofile]),boundaries[nofile],eg.filesin[nofile],info))
+    if(LoadElmerInput(&(data[nofile]),boundaries[nofile],eg.filesin[nofile],
+		      !eg.usenames,info))
       Goodbye();
     nomeshes++;
     break;
@@ -349,7 +363,7 @@ int main(int argc, char *argv[])
       boundaries[nofile][i].created = FALSE; 
       boundaries[nofile][i].nosides = 0;
     }
-    if(0 && !eg.usenames) data[nofile].boundarynamesexist = data[nofile].bodynamesexist = FALSE;
+    if(!eg.usenames) data[nofile].boundarynamesexist = data[nofile].bodynamesexist = FALSE;
     ElementsToBoundaryConditions(&(data[nofile]),boundaries[nofile],FALSE,TRUE);
     RenumberBoundaryTypes(&data[nofile],boundaries[nofile],TRUE,0,info);
   
@@ -734,9 +748,7 @@ int main(int argc, char *argv[])
   
   if(eg.clone[0] || eg.clone[1] || eg.clone[2]) {
     for(k=0;k<nomeshes;k++) {
-      CloneMeshes(&data[k],boundaries[k],eg.clone,eg.clonesize,FALSE,info);
-      /* mergeeps = fabs(eg.clonesize[0]+eg.clonesize[1]+eg.clonesize[2]) * 1.0e-8;
-	 MergeElements(&data[k],boundaries[k],eg.order,eg.corder,mergeeps,TRUE,TRUE); */
+      CloneMeshes(&data[k],boundaries[k],eg.clone,eg.clonesize,eg.cloneinds,info);
     }
   }
 
@@ -905,8 +917,10 @@ int main(int argc, char *argv[])
     }
 
     if( eg.partitions == 1 ) {
-      if(info) printf("One geometric partition requested, enforcing serial mode\n");
-      eg.partitions = 0;
+      if(!eg.connect) {
+	if(info) printf("One geometric partition requested, enforcing serial mode\n");
+	eg.partitions = 0;
+      }
     }
 
 
@@ -929,8 +943,9 @@ int main(int argc, char *argv[])
 	FindPeriodicNodes(&data[k],eg.periodicdim,info);
 
       if(eg.partitions) {
+	if( partopt == -1 ) partopt = partdual;
 	if(partopt == 0) 
-	  PartitionSimpleElements(&data[k],eg.partdim,eg.periodicdim,eg.partorder,eg.partcorder,info);	
+	  PartitionSimpleElements(&data[k],&eg,boundaries[k],eg.partdim,eg.periodicdim,eg.partorder,eg.partcorder,info);	
 	else if(partopt == 2) 
 	  PartitionSimpleElementsNonRecursive(&data[k],eg.partdim,eg.periodicdim,info);	
 	else if(partopt == 3) 
@@ -944,12 +959,17 @@ int main(int argc, char *argv[])
 	  printf("Metis optional parameter should be in range [0,4], not %d\n",partopt);
 	  bigerror("Cannot perform partitioning");
 	}
+	if( partopt <= 1 && eg.connect ) {
+	  printf("Elemental Metis partition cannot deal with constraints!\n");
+	  printf("Using Metis algorithms based on the dual graph\n");
+	  partopt = 2;	  
+	}
+       	
 	if(partopt <= 1) {
 	  if(!partdual) partdual = partopt;
 	  fail = PartitionMetisMesh(&data[k],&eg,eg.metis,partdual,info);
-	  if( fail ) partopt = 2;
 	}
-	if( partopt > 1 ) {
+	else {
 	  PartitionMetisGraph(&data[k],boundaries[k],&eg,eg.metis,partopt,partdual,info);
 	} 
       }
@@ -1001,7 +1021,7 @@ int main(int argc, char *argv[])
       if(data[k].nopartitions > 1) 
 	SaveElmerInputPartitioned(&data[k],boundaries[k],eg.filesout[k],eg.decimals,
 				  eg.partitionhalo,eg.partitionindirect,eg.parthypre,
-				  eg.partbcz,eg.nooverwrite,info);
+				  MAX(eg.partbcz,eg.partbcr),eg.nooverwrite,info);
       else
 	SaveElmerInput(&data[k],boundaries[k],eg.filesout[k],eg.decimals,eg.nooverwrite,info);
     }
@@ -1038,7 +1058,7 @@ int main(int argc, char *argv[])
   case 5:
     for(k=0;k<nomeshes;k++) {
       SaveMeshVtu(&data[k],boundaries[k],eg.saveboundaries ? MAXBOUNDARIES:0,
-		   eg.filesout[k],eg.decimals,info);
+		   eg.filesout[k],eg.vtuone,info);
     }
     break;
 

@@ -5,7 +5,7 @@ Header
 End
 
 Simulation
-  Max Output Level = 9
+  Max Output Level = 5
   Coordinate System = Cartesian
   Simulation Type = Steady
   Output Intervals(1) = 1
@@ -69,6 +69,7 @@ Solver 1
 ! In the unisotropic model the conductivity is aligned like the 
 ! previous gradient of the solution.
 !  Coil Unisotropic = Logical True
+  Nonlinear System Consistent Norm = True
 End
 
 
@@ -88,6 +89,7 @@ Solver 2
   Linear System Convergence Tolerance = 1.0e-8
 
   Linear System Abort Not Converged = False
+  Nonlinear System Consistent Norm = True
 End
 
 
@@ -108,6 +110,7 @@ Solver 3
 !  Variable = Divergence
 
   Divergence Variable = String "CoilCurrent"
+  Nonlinear System Consistent Norm = True
 End
 
 
@@ -139,7 +142,9 @@ Simulation :: Post File = "Curve_Fit3_Iso_Normalized.vtu"
 Solver 1 
   Normalize Coil Current = Logical True
   Coil Anisotropic = Logical False
-  Nonlinear System Max Iterations = 3
+  Coil Conductivity Fix = Logical True
 End 
 
-Solver 3 :: Reference Norm =  3.3032951515748102E-002
+Solver 1 :: Reference Norm = 6.09974197
+Solver 2 :: Reference Norm = 8.81329821E-01
+Solver 3 :: Reference Norm = 6.25135707E-02

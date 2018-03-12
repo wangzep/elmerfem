@@ -956,11 +956,15 @@
               BC => Model % BCs(i) % Values
 
               SpeciesTransferCoeff(1:n) = ListGetReal( BC, &
-                  'Mass Transfer Coefficient', n, NodeIndexes, GotIt )
+                  'Decay Rate Coefficient', n, NodeIndexes, GotIt )
               IF ( GotIt ) THEN
-                SExt(1:n) = ListGetReal( BC, &
-                    'External Concentration', n, NodeIndexes, GotIt )
-                
+              !  SExt(1:n) = ListGetReal( BC, &
+              !      'External Concentration', n, NodeIndexes, GotIt )
+              !Set the "Exteranl Concentration" to always be zero, this corresponds to decays to zero
+
+              SExt(1:n) = 0
+
+
                 IF ( .NOT. AbsoluteMass .OR. ScaledToSolubility ) THEN
                   IF ( .NOT. ErrorWritten ) THEN
                     CALL Error( 'XePol', '--------------------' )

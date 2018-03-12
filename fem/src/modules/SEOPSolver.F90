@@ -495,6 +495,7 @@ CONTAINS
     !------------------------------------------------------------------------------
     SUBROUTINE LocalMatrix(MASS, STIFF, FORCE, LOAD, Velo, Mvelo, Gamma, Element, n)
         !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: C
         REAL(KIND=dp) :: MASS(:,:), STIFF(:,:), FORCE(:), &
             LOAD(:), Velo(:,:), Gamma(:), MVelo(:,:)
         INTEGER :: n
@@ -512,6 +513,7 @@ CONTAINS
         FORCE = 0.0d0
         STIFF = 0.0d0
         MASS  = 0.0d0
+        C = 299792458.0D0
         CALL GetElementNodes( Nodes, Element )
         !------------------------------------------------------------------------------
         !      Numerical integration
@@ -544,11 +546,11 @@ CONTAINS
                 cu(i) = SUM( Basis(1:n) * Velo(i,1:n) )
             END DO
             !------------------------------------------------------------------------------
-            !        The advection-reaction equation: dc/dt + grad(u . c) + gamma c = s
+            !        The advection-reaction equation: 1/C dc/dt + grad(u . c) + gamma c = s
             !------------------------------------------------------------------------------
             DO p=1,n
                 DO q=1,n
-                    MASS(p,q)  = MASS(p,q)  + s * Basis(q) * Basis(p)
+                    MASS(p,q)  = MASS(p,q)  + s / C * Basis(q) * Basis(p)
                     STIFF(p,q) = STIFF(p,q) + s * (g + divMVelo) * Basis(q) * Basis(p)
                     DO i=1,dim
                         STIFF(p,q) = STIFF(p,q) - s * cu(i) * Basis(q) * dBasisdx(p,i)

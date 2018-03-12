@@ -47,27 +47,30 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
 
   TYPE(Model_t) :: Model
   TYPE(Solver_t) :: Solver
-  TYPE(variable_t), POINTER :: TimeVar, NormalVar, VarSurfResidual, GroundedMaskVar, HydroVar, DistanceVar
+  TYPE(variable_t), POINTER :: TimeVar, NormalVar, VarSurfResidual, GroundedMaskVar, HydroVar, DistanceVar, FrictionVar
   TYPE(ValueList_t), POINTER :: BC
   TYPE(Element_t), POINTER :: Element, CurElement, BoundaryElement
   TYPE(Nodes_t), SAVE :: Nodes
 
-  REAL(KIND=dp), POINTER :: NormalValues(:), ResidValues(:), GroundedMask(:), Hydro(:), Distance(:)
+  REAL(KIND=dp), POINTER :: NormalValues(:), ResidValues(:), GroundedMask(:), Hydro(:), &
+       Distance(:), FrictionValues(:)
   REAL(KIND=dp) :: Bdrag, t, told, thresh
   REAL(KIND=dp), ALLOCATABLE :: Normal(:), Fwater(:), Fbase(:)
 
-  INTEGER, POINTER :: NormalPerm(:), ResidPerm(:), GroundedMaskPerm(:), HydroPerm(:), DistancePerm(:)
+  INTEGER, POINTER :: NormalPerm(:), ResidPerm(:), GroundedMaskPerm(:), HydroPerm(:), &
+       DistancePerm(:), FrictionPerm(:)
   INTEGER :: nodenumber, ii, DIM, GL_retreat, n, tt, Nn, jj, MSum, ZSum
 
-  LOGICAL :: FirstTime = .TRUE., GotIt, Yeschange, GLmoves, Friction
+  LOGICAL :: FirstTime = .TRUE., GotIt, Yeschange, GLmoves, Friction,UnFoundFatal=.TRUE.
 
   REAL (KIND=dp) ::  y, relChange, relChangeOld, Sliding_Budd, Sliding_Weertman, Friction_Coulomb
 
   REAL(KIND=dp) :: comp, cond, TestContact
-  CHARACTER(LEN=MAX_NAME_LEN) :: USF_Name='SlidCoef_Contact', Sl_Law, GLtype
+  CHARACTER(LEN=MAX_NAME_LEN) :: USF_Name='SlidCoef_Contact', Sl_Law, GLtype, FrictionVarName
 
   SAVE FirstTime, yeschange, told, GLmoves, thresh, GLtype, TestContact
   SAVE DIM, USF_Name, Normal, Fwater, Fbase, relChangeOld, Sl_Law
+  SAVE FrictionVar, FrictionValues, FrictionPerm, BC
 
 !----------------------------------------------------------------------------
 
@@ -76,13 +79,9 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
   t = TimeVar % Values(1)
 
 ! GroundedMask import
-  GroundedMaskVar => VariableGet( Model % Mesh % Variables, 'GroundedMask')
-  IF ( ASSOCIATED( GroundedMaskVar ) ) THEN
-     GroundedMask => GroundedMaskVar % Values
-     GroundedMaskPerm => GroundedMaskVar % Perm
-  ELSE
-     CALL FATAL( USF_Name, 'need to get GroundedMask')
-  END IF
+  GroundedMaskVar => VariableGet( Model % Mesh % Variables, 'GroundedMask',UnFoundFatal=UnFoundFatal)
+  GroundedMask => GroundedMaskVar % Values
+  GroundedMaskPerm => GroundedMaskVar % Perm
   
   relchange = Model % Solver % Variable % NonLinChange
 
@@ -110,7 +109,7 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
      IF (.NOT.Gotit) THEN
         CALL FATAL(USF_Name,'No "Sliding law" Name given')
      END IF
-     
+
      GLtype = GetString( BC, 'Grounding Line Definition', GotIt )
      IF (.NOT.Gotit) THEN
         GLtype = 'last grounded'
@@ -120,7 +119,7 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
         CALL Info(USF_Name, Message, Level=3)
      END IF
      
-     ! Possiblity to fix the grounding line, default is a moving Grounding Line
+     ! Possibility to fix the grounding line, default is a moving Grounding Line
      GLmoves = GetLogical( BC, 'Grounding line moves', GotIt )
      IF (.NOT.GotIt) THEN
         GLmoves = .TRUE.
@@ -155,6 +154,21 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
         CALL INFO( USF_Name, 'far inland nodes will not detach', level=3)
      END IF
   ENDIF
+  
+  IF(Sl_Law(1:10) == 'prescribed') THEN
+     FrictionVarName = GetString( BC, 'Friction Variable Name', GotIt )
+     IF(.NOT. GotIt) CALL Fatal(USF_Name, 'Prescribed friction requested but no &
+          "Friction Variable Name" found!')
+     FrictionVar => VariableGet(Model % Mesh % Variables, FrictionVarName)
+     IF(ASSOCIATED(FrictionVar)) THEN
+        FrictionValues => FrictionVar % Values
+        FrictionPerm => FrictionVar % Perm
+     ELSE
+        WRITE(Message, '(A,A)') 'Unable to find variable: ',FrictionVarName
+        CALL Fatal(USF_Name, Message)
+     END IF
+  END IF
+
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! First time step for a New time
@@ -169,13 +183,9 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
   ! to use the non detachment possibility when a grounded node is too far from the grounding line
   ! and positioned on a well below sea level bedrock
   IF (thresh.GT.0.0) THEN
-     DistanceVar => VariableGet( Model % Mesh % Variables, 'Distance')
-     IF ( ASSOCIATED( DistanceVar ) ) THEN
-        Distance => DistanceVar % Values
-        DistancePerm => DistanceVar % Perm
-     ELSE
-        CALL FATAL( USF_Name, 'need to get DistanceSolver for the use of "non detachment inland distance"' )
-     END IF
+     DistanceVar => VariableGet( Model % Mesh % Variables, 'Distance',UnFoundFatal=UnFoundFatal)
+     Distance => DistanceVar % Values
+     DistancePerm => DistanceVar % Perm
   END IF
   
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -196,35 +206,20 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
 
      CALL Info(USF_name,'FLOW SOLVER HAS SLIGHTLY CONVERGED: look for new basal conditions', Level=3)
 
-     VarSurfResidual => VariableGet( Model % Mesh % Variables, 'Flow Solution Loads' )
-     IF ( ASSOCIATED( VarSurfResidual ) ) THEN
-        ResidPerm => VarSurfResidual  % Perm
-        ResidValues => VarSurfResidual % Values
-     ELSE
-        WRITE(Message, '(A)') '> Flow Solution Loads< not associated'
-        CALL FATAL( USF_Name, Message)
-     END IF
+     VarSurfResidual => VariableGet( Model % Mesh % Variables, 'Flow Solution Loads',UnFoundFatal=UnFoundFatal)
+     ResidPerm => VarSurfResidual  % Perm
+     ResidValues => VarSurfResidual % Values
 
-     NormalVar => VariableGet(Model % Variables,'Normal Vector')
-     IF ( ASSOCIATED( NormalVar ) ) THEN
-        NormalPerm => NormalVar % Perm
-        NormalValues => NormalVar % Values
-     ELSE
-        WRITE(Message, '(A)') '>Normal Vector< not associated'
-        CALL FATAL(USF_Name, Message)
-     END IF
+     NormalVar => VariableGet(Model % Variables,'Normal Vector',UnFoundFatal=UnFoundFatal)
+     NormalPerm => NormalVar % Perm
+     NormalValues => NormalVar % Values
      
      !Force exerted by the water, computed for each good boundary nodes (whatever on the bed or floating)
      !From GetHydrostaticLoads
      
-     HydroVar => VariableGet( Model % Mesh % Variables, 'Fw')
-     IF ( ASSOCIATED( HydroVar ) ) THEN
-        Hydro => HydroVar % Values
-        HydroPerm => HydroVar % Perm
-     ELSE
-        WRITE(Message, '(A)') '>Fw< not associated'
-        CALL FATAL( USF_Name, Message)
-     END IF
+     HydroVar => VariableGet( Model % Mesh % Variables, 'Fw',UnFoundFatal=UnFoundFatal)
+     Hydro => HydroVar % Values
+     HydroPerm => HydroVar % Perm
      
      ! Retreat of the Grounding line if Hydro loads higher than residual values
      GL_retreat = 0
@@ -357,6 +352,10 @@ FUNCTION SlidCoef_Contact ( Model, nodenumber, y) RESULT(Bdrag)
            Bdrag = Sliding_Budd(Model, nodenumber, y)
         CASE ('coulomb')
            Bdrag = Friction_Coulomb(Model, nodenumber, y)
+        CASE('prescribed beta2')
+           Bdrag = FrictionValues(FrictionPerm(nodenumber))**2.0_dp
+        CASE('prescribed power')
+           Bdrag = 10.0_dp**FrictionValues(FrictionPerm(nodenumber))
         CASE DEFAULT
            WRITE(Message, '(A,A)') 'Sliding law not recognised ',Sl_law
            CALL FATAL( USF_Name, Message)
