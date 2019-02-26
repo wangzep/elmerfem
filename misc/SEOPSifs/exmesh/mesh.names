@@ -1,0 +1,14 @@
+! ----- names for bodies -----
+$ Laser = 1
+$ Cell = 2
+! ----- names for boundaries -----
+$ Inlet = 1
+$ Outlet = 2
+$ Cool-Inlet = 3
+$ Cool-Outlet = 4
+$ Warmup = 5
+$ RbSink = 6
+$ LaserFace = 7
+$ Wall = 8
+$ RbWall = 9
+$ bnry12 = 10

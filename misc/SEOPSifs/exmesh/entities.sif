@@ -1,0 +1,50 @@
+!------ Skeleton for body section -----
+Body 1
+  Name = Laser
+End
+
+Body 2
+  Name = Cell
+End
+
+!------ Skeleton for boundary section -----
+Boundary Condition 1
+  Name = Inlet
+End
+
+Boundary Condition 2
+  Name = Outlet
+End
+
+Boundary Condition 3
+  Name = Cool-Inlet
+End
+
+Boundary Condition 4
+  Name = Cool-Outlet
+End
+
+Boundary Condition 5
+  Name = Warmup
+End
+
+Boundary Condition 6
+  Name = RbSink
+End
+
+Boundary Condition 7
+  Name = LaserFace
+End
+
+Boundary Condition 8
+  Name = Wall
+End
+
+Boundary Condition 9
+  Name = RbWall
+End
+
+Boundary Condition 10
+  Name = bnry12
+End
+
