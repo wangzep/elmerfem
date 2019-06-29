@@ -499,15 +499,16 @@ CONTAINS
 !------------------------------------------------------------------------------
 !>    Add a row together with another row of a CRS matrix, and thereafter zero it.
 !------------------------------------------------------------------------------
-  SUBROUTINE CRS_MoveRow( A,n1,n2,coeff )
+  SUBROUTINE CRS_MoveRow( A,n1,n2,coeff,staycoeff )
 !------------------------------------------------------------------------------
     TYPE(Matrix_t) :: A    !< Structure holding the matrix
     INTEGER, INTENT(IN) :: n1         !< Row number to be copied and zerod
     INTEGER, INTENT(IN) :: n2         !< Row number to be added
     REAL(KIND=dp),OPTIONAL :: coeff   !< Optional coefficient to multiply the row to be copied with
+    REAL(KIND=dp),OPTIONAL :: staycoeff   !< Optional coefficient to multiply the staying row
 !------------------------------------------------------------------------------
 
-    REAL(KIND=dp) :: VALUE, c
+    REAL(KIND=dp) :: val, c, d
     INTEGER :: i,j
 
     IF( PRESENT(Coeff)) THEN
@@ -516,11 +517,19 @@ CONTAINS
       c = 1.0_dp
     END IF
 
+    IF( PRESENT(StayCoeff)) THEN
+      d = StayCoeff
+    ELSE
+      d = 0.0_dp
+    END IF
+
     DO i=A % Rows(n1),A % Rows(n1+1)-1
       j = A % Cols(i)
-      VALUE = c * A % Values(i) 
-      A % Values(i) = 0.0_dp
-      CALL CRS_AddToMatrixElement( A,n2,j,VALUE )      
+      val = A % Values(i) 
+      IF( ABS( val ) > TINY( val ) ) THEN
+        A % Values(i) = d * val 
+        CALL CRS_AddToMatrixElement( A,n2,j,c*val )      
+      END IF
     END DO
 
   END SUBROUTINE CRS_MoveRow
@@ -702,8 +711,9 @@ CONTAINS
                     ! Get global matrix index for entry (ri,ci).
 !DIR$ INLINE
                     nidx=GetNextIndex(gja, ci, rli, rti)
-                    Lind(nzind+cdof)=nidx
-                    Lvals(nzind+cdof)=Lmtr(NDOFs*(pind(i)-1)+rdof,&
+                    nzind = nzind + 1
+                    Lind(nzind)=nidx
+                    Lvals(nzind)=Lmtr(NDOFs*(pind(i)-1)+rdof,&
                                            NDOFs*(pind(j)-1)+cdof)
 #ifdef __INTEL_COMPILER
                     ! Issue prefetch for every new cache line of gval(nidx)
@@ -713,7 +723,6 @@ CONTAINS
                     END IF
 #endif
                   END DO
-                  nzind = nzind + cdof
                 END IF
               END DO
             END DO
@@ -754,6 +763,7 @@ CONTAINS
         ! More than 1 DOF per node
 
         ! Construct index array
+        nzind = 0
         DO i=1,N
           DO rdof=1,NDOFs
             ! Row index
@@ -768,9 +778,9 @@ CONTAINS
                 ! Get global matrix index for entry (ri,ci).
 !DIR$ INLINE
                 nidx = GetNextIndex(gja, ci, rli, rti)
-                Lind((NDOFs*N)*(i-1)+NDOFs*(j-1)+cdof)=nidx
-                Lvals((NDOFs*N)*(i-1)+NDOFs*(j-1)+cdof)=Lmtr(NDOFs*(pind(i)-1)+rdof,&
-                                                             NDOFs*(pind(j)-1)+cdof)
+                nzind = nzind + 1
+                Lind(nzind) = nidx
+                Lvals(nzind) = Lmtr(NDOFs*(pind(i)-1)+rdof, NDOFs*(pind(j)-1)+cdof)
 #ifdef __INTEL_COMPILER
                 ! Issue prefetch for every new cache line of gval(nidx)
                 IF (nidx > pnidx+8) THEN
@@ -781,8 +791,6 @@ CONTAINS
               END DO
             END DO
           END DO
-
-          nzind = (NDOFs*N)*(NDOFs*N)
         END DO
       END IF ! NDOFs==1 check
     END IF ! Masking check
@@ -1173,22 +1181,28 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 !------------------------------------------------------------------------------
 !>    Create the structures required for a CRS format matrix.
 !------------------------------------------------------------------------------
-  FUNCTION CRS_CreateMatrix( N,Total,RowNonzeros,Ndeg,Reorder,AllocValues ) RESULT(A)
+  FUNCTION CRS_CreateMatrix( N,Total,RowNonzeros,Ndeg,Reorder,AllocValues,SetRows ) RESULT(A)
 !------------------------------------------------------------------------------
     INTEGER, INTENT(IN) :: N    !< Number of rows in the matrix
     INTEGER, INTENT(IN) :: Total  !< Total number of nonzero entries in the matrix
     INTEGER, INTENT(IN) :: Ndeg   !< Negrees of freedom
-    INTEGER, INTENT(IN) :: RowNonzeros(:)  !< Number of nonzero entries in rows of the matrix
-    INTEGER, INTENT(IN) :: Reorder(:)      !< Permutation index for bandwidth reduction
+    INTEGER, INTENT(IN), OPTIONAL :: RowNonzeros(:)  !< Number of nonzero entries in rows of the matrix
+    INTEGER, INTENT(IN) :: Reorder(:)      !< Permutation index for bandwidth reduction    
     LOGICAL, INTENT(IN) :: AllocValues     !< Should the values arrays be allocated ?
+    LOGICAL, INTENT(IN), OPTIONAL :: SetRows
     TYPE(Matrix_t), POINTER :: A  !>  Pointer to the created Matrix_t structure.
 !------------------------------------------------------------------------------
     INTEGER :: i,j,k,istat
     INTEGER, POINTER CONTIG :: InvPerm(:)
+    LOGICAL :: SetRowSizes
 !------------------------------------------------------------------------------
 
     CALL Info('CRS_CreateMatrix','Creating CRS Matrix of size: '//TRIM(I2S(n)),Level=12)
 
+    SetRowSizes = .TRUE.
+    IF( PRESENT( SetRows ) ) SetRowSizes = SetRows
+
+    
     A => AllocateMatrix()
 
     ALLOCATE( A % Rows(n+1),A % Diag(n),STAT=istat )
@@ -1215,7 +1229,21 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 
     NULLIFY( A % ILUValues )
     NULLIFY( A % CILUValues )
+    
+    A % NumberOfRows = N
+    A % Rows(1) = 1
+    A % Ordered = .FALSE.
 
+    ! We don't always want to set the rows as it is more easily done elsewhere
+    ! but for backward compatibility the default way is maintained.
+    IF(.NOT. SetRowSizes ) THEN
+      A % Cols = 0
+      A % Diag = 0
+      RETURN
+    END IF
+
+
+    
     InvPerm => A % Diag ! just available memory space...
     j = 0
     DO i=1,SIZE(Reorder)
@@ -1240,8 +1268,6 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 #endif
 
     !$OMP SINGLE
-    A % NumberOfRows = N
-    A % Rows(1) = 1
     DO i=2,N
        j = InvPerm((i-2)/Ndeg+1)
        A % Rows(i) = A % Rows(i-1) + Ndeg*RowNonzeros(j)
@@ -1270,7 +1296,6 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 #endif
     !$OMP END PARALLEL
     
-    A % Ordered = .FALSE.
 
     CALL Info('CRS_CreateMatrix','Creating CRS Matrix finished',Level=14)
 
@@ -2032,9 +2057,9 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     REAL(KIND=dp), OPTIONAL :: RemoveEps
     !-------------------------------------------------------------------------------------------
     INTEGER :: i,j,k,l,iml,kb,kb0,n,rowkb
-    INTEGER, POINTER :: Cols(:), Rows(:), Diag(:)
+    INTEGER, POINTER CONTIG :: Cols(:), Rows(:), Diag(:)
     REAL(KIND=DP) :: val, imval, reps
-    REAL(KIND=DP), POINTER :: Values(:)
+    REAL(KIND=DP), POINTER CONTIG :: Values(:)
     LOGICAL :: IsComplex, Hit, ImHit, CheckDiag
     
     N = A % NumberOfRows
@@ -2796,7 +2821,8 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 !------------------------------------------------------------------------------
 
 
-  SUBROUTINE CRS_CreateChildMatrix( ParentMat, ParentDofs, ChildMat, Dofs, ColDofs, CreateRhs, NoReuse ) 
+  SUBROUTINE CRS_CreateChildMatrix( ParentMat, ParentDofs, ChildMat, Dofs, ColDofs, &
+      CreateRhs, NoReuse, Diagonal ) 
 
     TYPE(Matrix_t) :: ParentMat
     INTEGER :: ParentDofs
@@ -2805,16 +2831,24 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     INTEGER, OPTIONAL :: ColDofs
     LOGICAL, OPTIONAL :: CreateRhs
     LOGICAL, OPTIONAL :: NoReuse
-    INTEGER :: i,j,ii,jj,k,l,m,n,nn,Cdofs
-    LOGICAL :: ReuseMatrix
+    LOGICAL, OPTIONAL :: Diagonal
 
+    INTEGER :: i,j,ii,jj,k,l,m,n,nn,Cdofs,Cmult
+    LOGICAL :: ReuseMatrix
+    LOGICAL :: IsDiagonal
+    
     IF( PRESENT( ColDofs ) ) THEN
       CDofs = ColDofs
     ELSE
       CDofs = Dofs
     END IF
 
-
+    IF( PRESENT( Diagonal ) ) THEN
+      IsDiagonal = Diagonal
+    ELSE
+      IsDiagonal = .FALSE.
+    END IF
+    
     ReuseMatrix = ( Dofs == ParentDofs .AND. CDofs == ParentDofs )
     IF( PRESENT( NoReuse ) ) THEN
       IF( NoReuse ) ReuseMatrix = .FALSE.         
@@ -2850,6 +2884,57 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
       m = SIZE( ParentMat % Values )
       ALLOCATE( ChildMat % Values(m) )
       ChildMat % Values = 0.0_dp
+    ELSE IF( IsDiagonal ) THEN
+
+      CALL Info('CRS_CreateChildMatrix','Multiplying initial matrix topology for diagonal system',Level=8)    
+
+      IF( CDofs /= Dofs ) THEN
+        CALL Fatal('CRS_CreateChildMatrix','Diagonal matrix must be square matrix!')
+      END IF
+      
+      cmult = Dofs / ParentDofs 
+      IF( cmult <= 1 .OR. Dofs /= cmult * ParentDofs ) THEN
+        CALL Fatal('CRS_CreateChildMatrix','Diagonal child matrix must be a multiple of parent matrix!')        
+      END IF
+            
+      ALLOCATE( ChildMat % Cols( SIZE(ParentMat % Cols) * cmult ) )
+      ALLOCATE( ChildMat % Rows( (SIZE(ParentMat % Rows)-1) * cmult + 1 ) )
+
+      ChildMat % NumberOfRows = ParentMat % NumberOfRows * cmult
+      
+      ii = 0
+      jj = 0
+      ChildMat % Rows(1) = 1
+      DO i=1, ParentMat % NumberOFRows
+
+        DO k=1,cmult
+
+          ii = ii + 1
+          DO j=ParentMat % Rows(i), ParentMat % Rows(i+1)-1
+            nn = ParentMat % Cols(j)
+            jj = jj + 1            
+            ChildMat % Cols(jj) = cmult*(nn-1) + k
+          END DO
+
+          ChildMat % Rows(ii+1) = jj+1
+        END DO
+      END DO
+      
+      ALLOCATE( ChildMat % Values(jj) )
+      ChildMat % Values = 0.0_dp
+
+      IF( Dofs == CDofs ) THEN
+        ALLOCATE( ChildMat % Diag( SIZE(ParentMat % Diag) * cmult ) )
+        DO i=1,ChildMat % NumberOfRows
+          DO j=ChildMat % Rows(i), ChildMat % Rows(i+1)-1
+            IF (ChildMat % Cols(j) == i) THEN
+              ChildMat % Diag(i) = j
+              EXIT
+            END IF
+          END DO
+        END DO
+      END IF
+
     ELSE
       CALL Info('CRS_CreateChildMatrix','Multiplying initial matrix topology',Level=8)    
 
@@ -3672,9 +3757,9 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
       INTEGER :: i,j,k,l,istat, RowMin, RowMax
       REAL(KIND=dp) :: NORMA
 
-      REAL(KIND=dp), POINTER :: Values(:), ILUValues(:), CWork(:)
+      REAL(KIND=dp), POINTER CONTIG :: Values(:), ILUValues(:), CWork(:)
 
-      INTEGER, POINTER :: Cols(:), Rows(:), Diag(:), &
+      INTEGER, POINTER CONTIG :: Cols(:), Rows(:), Diag(:), &
            ILUCols(:), ILURows(:), ILUDiag(:), IWork(:)
 
       LOGICAL :: C(n)
@@ -3886,10 +3971,10 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
       INTEGER :: i,j,k,l,istat,RowMin,RowMax
       REAL(KIND=dp) :: NORMA
 
-      REAL(KIND=dp), POINTER :: Values(:)
-      COMPLEX(KIND=dp), POINTER :: ILUValues(:), CWork(:)
+      REAL(KIND=dp), POINTER CONTIG :: Values(:)
+      COMPLEX(KIND=dp), POINTER CONTIG :: ILUValues(:), CWork(:)
 
-      INTEGER, POINTER :: Cols(:), Rows(:), Diag(:), &
+      INTEGER, POINTER CONTIG :: Cols(:), Rows(:), Diag(:), &
            ILUCols(:), ILURows(:), ILUDiag(:), IWork(:)
 
       LOGICAL :: C(n)

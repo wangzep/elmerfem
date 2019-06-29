@@ -6,32 +6,12 @@ SET(CMAKE_Fortran_MODULE_DIRECTORY
 # -- set Solvers without external dependency  -- #
 # ---------------------------------------------- #
 SET(ElmerIce_MeshAdapt2D_SRC
+    MMG2DSolver.F90
     Compute2DNodalGradient.F90
     MMG2D_MetricAniso.F90
-    MMG2D_MetricIntersect.F90)
-
-# ---------------------- #
-# -- LOOK FOR MMG     -- #
-#----------------------- #
-MESSAGE(STATUS "------------------------------------------------")
-MESSAGE(STATUS "Elmer/Ice package: Mesh adaptation 2D looking for [Mmg] tools ")
-
-FIND_PACKAGE(MMG)
-
-IF(MMG_FOUND)
-  SET(HAVE_MMG TRUE CACHE BOOL "Has Mmg tools for Elmer/Ice Mesh adaptation" ) 
-  MARK_AS_ADVANCED(HAVE_MMG)
-  MESSAGE(STATUS "  Mmg:           " "${MMG_FOUND}")
-  MESSAGE(STATUS "  Mmg_INC:       " "${MMG_INCLUDE_DIR}")
-  MESSAGE(STATUS "  Mmg_LIB:      " "${MMG_LIBRARY}")
-  MESSAGE(STATUS "Compile MMG2DSolver")
-  LIST(APPEND  ElmerIce_MeshAdapt2D_SRC MMG2DSolver.F90)
-ELSE()
-  MESSAGE(STATUS "  Library not found: >MMG_FOUND< ")
-  MESSAGE(STATUS "    Missing: >MMG_INCLUDE_DIR< , >MMG_LIBRARY<, to compile MMG2DSolver")
-ENDIF(MMG_FOUND)
-
-MESSAGE(STATUS "------------------------------------------------")
+    MMG2D_MetricIntersect.F90
+    GetActiveMesh.F90
+    GetConnectedAreas.F90)
 
 ADD_LIBRARY(ElmerIce_MeshAdapt2D SHARED ${ElmerIce_MeshAdapt2D_SRC})
 
@@ -60,7 +40,7 @@ IF(NOT(WIN32))
 ENDIF()
 
 IF(MMG_FOUND)
-  INCLUDE_DIRECTORIES(${MMG_INCLUDE_DIR}/mmg)
+  INCLUDE_DIRECTORIES(${MMG_INCLUDE_DIR})
   TARGET_LINK_LIBRARIES(ElmerIce_MeshAdapt2D ${MMG_LIBRARY} elmersolver)
 ELSE()
   TARGET_LINK_LIBRARIES(ElmerIce_MeshAdapt2D elmersolver)

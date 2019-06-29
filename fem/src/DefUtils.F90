@@ -361,7 +361,7 @@ CONTAINS
 
     IF( PRESENT( IpVar ) ) THEN
       IF( IpVar % TYPE /= Variable_on_gauss_points ) THEN
-        CALL Fatal('GetIpIndex','Variable is not of type gauss points!')
+        CALL Fatal('GetIpCount','Variable is not of type gauss points!')
       END IF
       IpCount = SIZE( IpVar % Values ) / IpVar % Dofs
     ELSE    
@@ -636,42 +636,62 @@ CONTAINS
 
      Element => GetCurrentElement(UElement)
 
-     IF ( ASSOCIATED( Variable ) ) THEN
-        Indexes => GetIndexStore()
-        IF ( ASSOCIATED(Variable % Solver ) ) THEN
-          n = GetElementDOFs( Indexes, Element, Variable % Solver )
-        ELSE
-          n = GetElementDOFs( Indexes, Element, Solver )
-        END IF
-        n = MIN( n, SIZE(x) )
+     Indexes => GetIndexStore()
+     IF ( ASSOCIATED(Variable % Solver ) ) THEN
+       n = GetElementDOFs( Indexes, Element, Variable % Solver )
+     ELSE
+       n = GetElementDOFs( Indexes, Element, Solver )
+     END IF
+     n = MIN( n, SIZE(x) )
 
-        Values => Variable % Values
-        IF ( PRESENT(tStep) ) THEN
-          IF ( tStep<0 ) THEN
-            IF ( ASSOCIATED(Variable % PrevValues) .AND. -tStep<=SIZE(Variable % PrevValues,2)) &
-              Values => Variable % PrevValues(:,-tStep)
-          END IF
-        END IF
+     Values => Variable % Values
+     IF ( PRESENT(tStep) ) THEN
+       IF ( tStep<0 ) THEN
+         IF ( ASSOCIATED(Variable % PrevValues) .AND. -tStep<=SIZE(Variable % PrevValues,2)) &
+             Values => Variable % PrevValues(:,-tStep)
+       END IF
+     END IF
 
-        DO i=1,Variable % DOFs
-           IF ( ASSOCIATED( Variable % Perm ) ) THEN
-             DO j=1,n
-               k = Indexes(j)
-               IF ( k>0 .AND. k<=SIZE(Variable % Perm) ) THEN
-                 k = Variable % Perm(k)
-                 IF (k>0) x(i,j) = Values(Variable % DOFs*(k-1)+i)
-               END IF
+
+     ! If variable is defined on gauss points return that instead
+     IF( Variable % TYPE == Variable_on_gauss_points ) THEN
+       ASSOCIATE(dofs => variable % dofs)
+         j = Element % ElementIndex
+         n = Variable % Perm(j+1) - Variable % Perm(j)
+         IF (size(x,1) < dofs .or. size(x,2) < n) THEN
+           write (message,*) 'Attempting to get IP solution to a too small array of size', &
+               shape(x), '. Required size:', dofs, n
+           CALL Fatal('GetVectorLocalSolution', message)
+         END IF
+         DO i=1,n
+           ASSOCIATE(p => variable % perm(j) + i)
+             DO k=1,dofs
+               x(k, i) = Values((p-1)*dofs + k)
              END DO
-           ELSE
-              DO j=1,n
-                IF ( Variable % DOFs*(Indexes(j)-1)+i <= &
-                                SIZE( Variable % Values ) ) THEN
-                  x(i,j) = Values(Variable % DOFs*(Indexes(j)-1)+i)
-                END IF
-              END DO
+           END ASSOCIATE
+         END DO
+         RETURN
+       END ASSOCIATE
+     END IF
+
+     DO i=1,Variable % DOFs
+       IF ( ASSOCIATED( Variable % Perm ) ) THEN
+         DO j=1,n
+           k = Indexes(j)
+           IF ( k>0 .AND. k<=SIZE(Variable % Perm) ) THEN
+             k = Variable % Perm(k)
+             IF (k>0) x(i,j) = Values(Variable % DOFs*(k-1)+i)
            END IF
          END DO
-     END IF
+       ELSE
+         DO j=1,n
+           IF ( Variable % DOFs*(Indexes(j)-1)+i <= &
+               SIZE( Variable % Values ) ) THEN
+             x(i,j) = Values(Variable % DOFs*(Indexes(j)-1)+i)
+           END IF
+         END DO
+       END IF
+     END DO
   END SUBROUTINE GetVectorLocalSolution
 
 
@@ -1835,22 +1855,35 @@ CONTAINS
   END FUNCTION GetElementDOFs
 
 
-!> Returns the number of bubble degree of freedom in the active element
-  FUNCTION GetElementNOFBDOFs( Element, USolver ) RESULT(n)
+! -----------------------------------------------------------------------------
+!> Returns the number of bubble degrees of freedom in the active element.
+!> If the sif file contains more than one solver section
+!> with each of them having their own specification of the "Element" 
+!> keyword, the returned value may not be the number of bubbles that
+!> should be assigned to the solver. With the optional argument 
+!> Update = .TRUE., the correct solver-wise bubble count can be returned and
+!> the bubble count assigned to the Element argument is updated.
+! -----------------------------------------------------------------------------
+  FUNCTION GetElementNOFBDOFs( Element, USolver, Update ) RESULT(n)
+! -----------------------------------------------------------------------------
     INTEGER :: n
-    TYPE(Solver_t), OPTIONAL, POINTER :: USolver
     TYPE(Element_t), OPTIONAL :: Element
+    TYPE(Solver_t), OPTIONAL, POINTER :: USolver
+    LOGICAL, OPTIONAL :: Update
+
     TYPE(Element_t), POINTER  :: CurrElement
-
     TYPE(Solver_t), POINTER :: Solver
-
-    LOGICAL :: Found, GB
+    LOGICAL :: Found, GB, UpdateRequested
+    INTEGER :: k
 
     IF ( PRESENT( USolver ) ) THEN
        Solver => USolver
     ELSE
        Solver => CurrentModel % Solver
     END IF
+
+    UpdateRequested = .FALSE.
+    IF ( PRESENT(Update) ) UpdateRequested = Update
 
     !GB = ListGetLogical( Solver % Values, 'Bubbles in Global System', Found )
     !IF (.NOT.Found) GB = .TRUE.
@@ -1859,7 +1892,26 @@ CONTAINS
     n = 0
     IF ( .NOT. GB ) THEN
       CurrElement => GetCurrentElement(Element)
-      n = CurrElement % BDOFs
+      IF (UpdateRequested) THEN
+        n = Solver % Def_Dofs(GetElementFamily(CurrElement), &
+            CurrElement % Bodyid, 5) 
+        IF ( n>=0 ) THEN
+          CurrElement % BDOFs = n
+        ELSE
+          n = CurrElement % BDOFs
+        END IF
+      ELSE
+        n = CurrElement % BDOFs
+      END IF
+    ELSE
+      ! Rectify the bubble count assigned to the Element argument in case
+      ! some other solver has tampered it:
+      IF (UpdateRequested) THEN
+        CurrElement => GetCurrentElement(Element)
+        k = Solver % Def_Dofs(GetElementFamily(CurrElement), &
+            CurrElement % Bodyid, 5)    
+        IF ( k>=0 ) CurrElement % BDOFs = k
+      END IF
     END IF
   END FUNCTION GetElementNOFBDOFs
 
@@ -2194,6 +2246,74 @@ CONTAINS
 !------------------------------------------------------------------------------
 
 
+!------------------------------------------------------------------------------
+!> Returns handle to Parent element of a boundary element with a larger body id.
+!------------------------------------------------------------------------------ 
+  FUNCTION GetBulkElementAtBoundary( Element, Found ) RESULT(BulkElement)
+!------------------------------------------------------------------------------
+    TYPE(Element_t), OPTIONAL :: Element
+    LOGICAL, OPTIONAL :: Found
+    TYPE(element_t), POINTER :: BulkElement
+!------------------------------------------------------------------------------    
+    TYPE(element_t), POINTER :: BulkElementL, BulkElementR, BoundaryElement
+    LOGICAL :: L
+    INTEGER :: mat_id, BodyIdL, BodyIdR
+
+    BulkElement => NULL()
+    
+    BoundaryElement => GetCurrentElement(Element)
+      
+    IF ( .NOT. ASSOCIATED(BoundaryElement % boundaryinfo)) RETURN
+    BulkElementR => BoundaryElement % boundaryinfo % right
+    BulkElementL => BoundaryElement % boundaryinfo % left
+    BodyIdR = 0; BodyIdL = 0
+    
+    IF (ASSOCIATED(BulkElementR)) BodyIdR = BulkElementR % BodyId
+    IF (ASSOCIATED(BulkElementL)) BodyIdL = BulkElementL % BodyId
+    
+    IF (BodyIdR == 0 .AND. BodyIdL == 0) THEN
+      RETURN
+    ELSE IF (BodyIdR > BodyIdL) THEN
+      BulkElement => BulkElementR
+    ELSE IF (bodyIdL >= BodyIdR) THEN
+      BulkElement => BulkElementL
+    END IF
+
+    IF( PRESENT( Found ) ) Found = ASSOCIATED( BulkElement ) 
+    
+!------------------------------------------------------------------------------
+  END FUNCTION GetBulkElementAtBoundary
+!------------------------------------------------------------------------------
+
+  
+!------------------------------------------------------------------------------
+!> Returns handle to Material value list of the bulk material meeting  
+!> element with larger body id. Typically Element is a boundary element.
+  FUNCTION GetBulkMaterialAtBoundary( Element, Found ) RESULT(Material)
+!------------------------------------------------------------------------------
+    TYPE(Element_t), OPTIONAL :: Element
+    LOGICAL, OPTIONAL :: Found
+    TYPE(ValueList_t), POINTER :: Material
+!------------------------------------------------------------------------------
+    TYPE(element_t), POINTER :: BulkElement
+    LOGICAL :: L
+    INTEGER :: mat_id
+
+    Material => NULL()
+
+    BulkElement => GetBulkElementAtBoundary(Element, Found)
+
+    IF( ASSOCIATED( BulkElement ) ) THEN
+      mat_id = GetMaterialId( BulkElement, L )      
+      IF ( L ) Material => CurrentModel % Materials(mat_id) % Values
+    ELSE
+      L = .FALSE.
+    END IF
+    
+    IF ( PRESENT( Found ) ) Found = L
+!------------------------------------------------------------------------------
+  END FUNCTION GetBulkMaterialAtBoundary
+!------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
 !> Return handle to the Body Force value list of the active element
@@ -2889,25 +3009,51 @@ CONTAINS
 
 !> Performs initialization for matrix equation related to the active solver
 !------------------------------------------------------------------------------
-  RECURSIVE SUBROUTINE DefaultInitialize( USolver )
+  RECURSIVE SUBROUTINE DefaultInitialize( USolver, UseConstantBulk )
 !------------------------------------------------------------------------------
      TYPE(Solver_t), OPTIONAL, TARGET, INTENT(IN) :: USolver
-
+     LOGICAL, OPTIONAL :: UseConstantBulk
+!------------------------------------------------------------------------------
      TYPE(Solver_t), POINTER :: Solver
-
+     LOGICAL :: Found
+     
      IF ( PRESENT( USolver ) ) THEN
        Solver => USolver
      ELSE
        Solver => CurrentModel % Solver
      END IF
 
+     IF( PRESENT( UseConstantBulk ) .AND. UseConstantBulk ) THEN
+       CALL Info('DefaultInitialize','Using constant bulk matrix',Level=8)
+       IF( .NOT. ASSOCIATED( Solver % Matrix % BulkValues ) ) THEN
+         CALL Warn('DefaultInitialie','Constant bulk system requested but not associated!')
+         RETURN
+       END IF
+       Solver % Matrix % Values = Solver % Matrix % BulkValues        
+       IF( ASSOCIATED( Solver % Matrix % BulkMassValues ) ) &
+           Solver % Matrix % MassValues = Solver % Matrix % BulkMassValues 
+       IF( ASSOCIATED( Solver % Matrix % BulkDampValues ) ) &
+           Solver % Matrix % DampValues = Solver % Matrix % BulkDampValues 
+       IF( ASSOCIATED( Solver % Matrix % BulkRhs ) ) &
+           Solver % Matrix % rhs = Solver % Matrix % BulkRhs 
+       RETURN
+     END IF
+
+     
      CALL DefaultSlaveSolvers(Solver,'Slave Solvers') ! this is the initial name of the slot
      CALL DefaultSlaveSolvers(Solver,'Nonlinear Pre Solvers')     
+
+
+     ! If we changed the system last time to harmonic one then revert back the real system
+     IF( ListGetLogical( Solver % Values,'Harmonic Mode',Found ) ) THEN
+       CALL ChangeToHarmonicSystem( Solver, .TRUE. )
+     END IF
+     
      
      IF(.NOT. ASSOCIATED( Solver % Matrix ) ) THEN
        CALL Fatal('DefaultInitialize','No matrix exists, cannot initialize!')
-     END IF
-
+     END IF     
+     
      CALL InitializeToZero( Solver % Matrix, Solver % Matrix % RHS )
 
      IF( ALLOCATED(Solver % Matrix % ConstrainedDOF) ) THEN
@@ -2917,30 +3063,48 @@ CONTAINS
      IF( ALLOCATED(Solver % Matrix % Dvalues) ) THEN
        Solver % Matrix % Dvalues = 0._dp
      END IF
-     
+
+     IF( ListGetLogical( Solver % Values,'Bulk Assembly Timing',Found ) ) THEN 
+       CALL ResetTimer('BulkAssembly'//GetVarName(Solver % Variable) ) 
+     END IF
+       
 !------------------------------------------------------------------------------
   END SUBROUTINE DefaultInitialize
 !------------------------------------------------------------------------------
 
 
 
-!> Performs finilizing steps related to the the active solver
+!> Performs pre-steps related to the the active solver
 !------------------------------------------------------------------------------
   SUBROUTINE DefaultStart( USolver )
 !------------------------------------------------------------------------------
      TYPE(Solver_t), OPTIONAL, TARGET, INTENT(IN) :: USolver
      
      TYPE(Solver_t), POINTER :: Solver
-
+     LOGICAL :: Found
+     TYPE(ValueList_t), POINTER :: Params
+     
      IF ( PRESENT( USolver ) ) THEN
        Solver => USolver
      ELSE
        Solver => CurrentModel % Solver
      END IF
+
+     Params => Solver % Values
      
      CALL Info('DefaultStart','Starting solver: '//&
-        TRIM(ListGetString(Solver % Values,'Equation')),Level=10)
-     
+        TRIM(ListGetString(Params,'Equation')),Level=10)
+
+     ! When Newton linearization is used we may reset it after previously visiting the solver
+     IF( Solver % NewtonActive ) THEN
+       IF( ListGetLogical( Params,'Nonlinear System Newton Reset', Found) ) Solver % NewtonActive = .FALSE.
+     END IF
+          
+     ! If we changed the system last time to harmonic one then revert back the real system
+     IF( ListGetLogical( Params,'Harmonic Mode',Found ) ) THEN
+       CALL ChangeToHarmonicSystem( Solver, .TRUE. )
+     END IF
+
      ! One can run preprocessing solver in this slot.
      !-----------------------------------------------------------------------------
      CALL DefaultSlaveSolvers(Solver,'Pre Solvers')
@@ -2951,7 +3115,7 @@ CONTAINS
 
 
   
-!> Performs finilizing steps related to the the active solver
+!> Performs finalizing steps related to the the active solver
 !------------------------------------------------------------------------------
   SUBROUTINE DefaultFinish( USolver )
 !------------------------------------------------------------------------------
@@ -2987,7 +3151,8 @@ CONTAINS
 
     TYPE(Matrix_t), POINTER   :: A
     TYPE(Variable_t), POINTER :: x
-    REAL(KIND=dp), POINTER CONTIG :: b(:), SOL(:)
+    REAL(KIND=dp), POINTER CONTIG :: b(:)
+    REAL(KIND=dp), POINTER :: SOL(:)
 
     LOGICAL :: Found, BackRot
 
@@ -2995,7 +3160,8 @@ CONTAINS
     TYPE(Solver_t), POINTER :: Solver
     TYPE(Matrix_t), POINTER :: Ctmp
     CHARACTER(LEN=MAX_NAME_LEN) :: linsolver, precond, dumpfile, saveslot
-    INTEGER :: NameSpaceI
+    INTEGER :: NameSpaceI, Count, MaxCount, i
+    LOGICAL :: LinearSystemTrialing
 
     CALL Info('DefaultSolve','Solving linear system with default routines',Level=10)
     
@@ -3004,13 +3170,16 @@ CONTAINS
     IF ( PRESENT( USolver ) ) Solver => USolver
 
     Params => GetSolverParams(Solver)
-    
+
     NameSpaceI = NINT( ListGetCReal( Params,'Linear System Namespace Number', Found ) )
+    LinearSystemTrialing = ListGetLogical( Params,'Linear System Trialing', Found )
+    IF( LinearSystemTrialing ) NameSpaceI = MAX( 1, NameSpaceI )
+      
     IF( NameSpaceI > 0 ) THEN
       CALL Info('DefaultSolve','Linear system namespace number: '//TRIM(I2S(NameSpaceI)),Level=7)
       CALL ListPushNamespace('linsys'//TRIM(I2S(NameSpaceI))//':')
     END IF
-
+    
     IF( ListCheckPresent( Params, 'Dump system matrix') .OR. &
         ListCheckPresent( Params, 'Dump system RHS') ) THEN
       CALL Error('DefaultSolve','> Dump System Matrix < and > Dump System Rhs < are obsolite')
@@ -3033,7 +3202,7 @@ CONTAINS
     END IF
 
     
-    IF( ListGetLogical( Solver % Values,'Harmonic Mode',Found ) ) THEN
+    IF( ListGetLogical( Params,'Harmonic Mode',Found ) ) THEN
       CALL ChangeToHarmonicSystem( Solver )
     END IF
 
@@ -3042,7 +3211,7 @@ CONTAINS
     CALL GenerateConstraintMatrix( CurrentModel, Solver )
 
     
-    IF( GetLogical(Solver % Values,'Linear System Solver Disabled',Found) ) THEN
+    IF( GetLogical(Params,'Linear System Solver Disabled',Found) ) THEN
       CALL Info('DefaultSolve','Solver disabled, exiting early!',Level=10)
       RETURN
     END IF
@@ -3052,16 +3221,62 @@ CONTAINS
     CALL Info('DefaultSolve','Calling SolveSystem for linear solution',Level=20)
 
     A => Solver % Matrix
-    b => A % RHS
     x => Solver % Variable
+    
+    b => A % RHS
     SOL => x % Values
-    CALL SolveSystem(A,ParMatrix,b,SOL,x % Norm,x % DOFs,Solver)
 
+10   CALL SolveSystem(A,ParMatrix,b,SOL,x % Norm,x % DOFs,Solver)
+    
+    IF( LinearSystemTrialing ) THEN
+      IF( x % LinConverged > 0 ) THEN
+        IF( ListGetLogical( Params,'Linear System Trialing Conserve',Found ) ) THEN
+          MaxCount = ListGetInteger( Params,'Linear System Trialing Conserve Rounds',Found ) 
+          IF( Found ) THEN
+            i = NINT( ListGetConstReal( Params,'Linear System Namespace Number',Found ) )
+            IF( i == NameSpaceI ) THEN
+              Count = 1 + ListGetInteger( Params,'Linear System Namespace Conserve Count',Found )
+            ELSE
+              Count = 0
+            END IF
+            IF( Count > MaxCount ) THEN
+              NameSpaceI = 0
+              Count = 0
+            END IF
+            CALL ListAddInteger( Params,'Linear System Namespace Conserve Count',Count )            
+          END IF
+          CALL ListAddConstReal( Params,'Linear System Namespace Number', 1.0_dp *NameSpaceI )
+        END IF
+      ELSE
+        NameSpaceI = NameSpaceI + 1      
+        IF( .NOT. ListCheckPrefix( Params,'linsys'//TRIM(I2S(NameSpaceI)) ) ) THEN
+          CALL Fatal('DefaultSolve','Exhausted all linear system strategies!')
+        END IF
+        CALL ListPopNamespace()
+        CALL Info('DefaultSolve','Linear system namespace number: '//TRIM(I2S(NameSpaceI)),Level=7)
+        CALL ListPushNamespace('linsys'//TRIM(I2S(NameSpaceI))//':')
+        GOTO 10
+      END IF
+    END IF
+    
+
+    IF ( ListGetLogical( Params,'Linear System Save',Found )) THEN
+      saveslot = GetString( Params,'Linear System Save Slot', Found )
+      IF( Found .AND. TRIM( saveslot ) == 'after') THEN
+        CALL SaveLinearSystem( Solver ) 
+      END IF
+    END IF
+
+    
     ! If flux corrected transport is used then apply the corrector to the system
     IF( GetLogical( Params,'Linear System FCT',Found ) ) THEN
       CALL FCT_Correction( Solver )
     END IF
- 
+
+    IF( ListGetLogical( Params,'Harmonic Mode',Found ) ) THEN
+      CALL ChangeToHarmonicSystem( Solver, .TRUE. )
+    END IF
+    
     IF (PRESENT(BackRotNT)) THEN
       IF (BackRot.NEQV.BackRotNT) &
         CALL ListAddLogical(Params,'Back Rotate N-T Solution',BackRot)
@@ -3070,24 +3285,37 @@ CONTAINS
     Norm = x % Norm
 
     IF( NameSpaceI > 0 ) CALL ListPopNamespace()
-
-
-    IF( ListGetLogical( Solver % Values,'Harmonic Mode',Found ) ) THEN
-      CALL ChangeToHarmonicSystem( Solver, .TRUE. )
-    END IF
-
-
     
     ! One can run postprocessing solver in this slot in every nonlinear iteration.
     !-----------------------------------------------------------------------------
     CALL DefaultSlaveSolvers(Solver,'Nonlinear Post Solvers')
 
+
+    ! This could be somewhere else too. Now it is here for debugging.
+    CALL SaveParallelInfo( Solver )
     
 !------------------------------------------------------------------------------
   END FUNCTION DefaultSolve
 !------------------------------------------------------------------------------
 
 
+!------------------------------------------------------------------------------
+!> Is the system converged. Wrapper to hide the dirty test.
+!------------------------------------------------------------------------------
+  FUNCTION DefaultConverged( USolver ) RESULT( Converged ) 
+!------------------------------------------------------------------------------
+    TYPE(Solver_t), OPTIONAL, TARGET, INTENT(in) :: USolver
+    TYPE(Solver_t), POINTER :: Solver
+    LOGICAL :: Converged
+    
+    Solver => CurrentModel % Solver
+    IF ( PRESENT( USolver ) ) Solver => USolver
+
+    Converged = ( Solver % Variable % NonlinConverged > 0 )
+
+  END FUNCTION DefaultConverged
+!------------------------------------------------------------------------------
+         
 
 !------------------------------------------------------------------------------
   FUNCTION DefaultLinesearch( Converged, USolver, FirstIter, nsize, values, values0 ) RESULT( ReduceStep ) 
@@ -3174,7 +3402,7 @@ CONTAINS
      TYPE(Variable_t), POINTER :: x
      TYPE(Element_t), POINTER  :: Element, P1, P2
      REAL(KIND=dp), POINTER CONTIG   :: b(:)
-     REAL(KIND=dp), POINTER :: SaveValues(:)
+     REAL(KIND=dp), POINTER CONTIG :: SaveValues(:)
 
      CHARACTER(LEN=MAX_NAME_LEN) :: str
 
@@ -3378,7 +3606,7 @@ CONTAINS
      TYPE(Matrix_t), POINTER   :: A
      TYPE(Variable_t), POINTER :: x
      TYPE(Element_t), POINTER  :: Element, P1, P2
-     REAL(KIND=dp), POINTER    :: b(:), SaveValues(:)
+     REAL(KIND=dp), POINTER  CONTIG :: b(:), SaveValues(:)
 
      REAL(KIND=dp), POINTER :: G(:,:), F(:)
 
@@ -3491,8 +3719,8 @@ CONTAINS
        END IF
      END IF
 
-    CALL UpdateGlobalForce( Solver % Matrix % RHS, &
-       F, n, x % DOFs, x % Perm(Indexes(1:n)), UElement=Element)
+     CALL UpdateGlobalForce( Solver % Matrix % RHS, &
+         F, n, x % DOFs, x % Perm(Indexes(1:n)), UElement=Element)
 
 !------------------------------------------------------------------------------
   END SUBROUTINE DefaultUpdateForceR
@@ -3687,7 +3915,7 @@ CONTAINS
      TYPE(Variable_t), POINTER :: x
      TYPE(Element_t), POINTER  :: Element, P1, P2
 
-     REAL(KIND=dp),  POINTER :: SaveValues(:)
+     REAL(KIND=dp),  POINTER CONTIG :: SaveValues(:)
 
      INTEGER :: i,j,n
      INTEGER, POINTER :: Indexes(:)
@@ -3753,7 +3981,7 @@ CONTAINS
      TYPE(Element_t), POINTER  :: Element, P1, P2
 
      REAL(KIND=dp), ALLOCATABLE :: M(:,:)
-     REAL(KIND=dp),  POINTER :: SaveValues(:)
+     REAL(KIND=dp),  POINTER CONTIG :: SaveValues(:)
 
      INTEGER :: i,j,n,DOFs
      INTEGER, POINTER :: Indexes(:)
@@ -3966,7 +4194,7 @@ CONTAINS
      TYPE(Variable_t), POINTER :: x
      TYPE(Element_t), POINTER  :: Element, P1, P2
 
-     REAL(KIND=dp), POINTER :: SaveValues(:)
+     REAL(KIND=dp), POINTER CONTIG :: SaveValues(:)
 
      INTEGER :: i,j,n
      INTEGER, POINTER :: Indexes(:)
@@ -4032,7 +4260,7 @@ CONTAINS
      TYPE(Variable_t), POINTER :: x
      TYPE(Element_t), POINTER  :: Element, P1, P2
 
-     REAL(KIND=dp), POINTER :: SaveValues(:)
+     REAL(KIND=dp), POINTER CONTIG :: SaveValues(:)
 
      REAL(KIND=dp), ALLOCATABLE :: B(:,:)
 
@@ -4112,7 +4340,7 @@ CONTAINS
      TYPE(Variable_t), POINTER :: x
      TYPE(Element_t), POINTER  :: Element, P1, P2
 
-     REAL(KIND=dp), POINTER :: SaveValues(:)
+     REAL(KIND=dp), POINTER CONTIG :: SaveValues(:)
 
      INTEGER :: i,j,n
      INTEGER, POINTER :: Indexes(:)
@@ -4185,7 +4413,7 @@ CONTAINS
      TYPE(Variable_t), POINTER :: x
      TYPE(Element_t), POINTER  :: Element, P1, P2
 
-     REAL(KIND=dp), POINTER :: SaveValues(:)
+     REAL(KIND=dp), POINTER CONTIG :: SaveValues(:)
 
      REAL(KIND=dp), ALLOCATABLE :: B(:,:),F(:)
 
@@ -4778,7 +5006,7 @@ CONTAINS
 
                    ! ---------------------------------------------------------------------
                    ! Set constraints for face DOFs via seeking the best approximation in L2.
-                   ! We use the variational equation (u x n,v) = (g x n - u0 x n,v) where
+                   ! We use the variational equation (u x n,v') = (g x n - u0 x n,v) where
                    ! u0 denotes the part of the interpolating function u+u0 which is already 
                    ! known and v is a test function for the Galerkin method.
                    ! ---------------------------------------------------------------------
@@ -5168,7 +5396,11 @@ CONTAINS
     END IF
 
     Params => GetSolverParams( PSolver ) 
-
+    
+    IF( ListGetLogical( Params,'Bulk Assembly Timing',Found ) ) THEN 
+      CALL CheckTimer('BulkAssembly'//GetVarName(PSolver % Variable), Level=5, Delete=.TRUE. ) 
+    END IF
+        
     ! Reset colouring 
     PSolver % CurrentColour = 0
 
@@ -5195,7 +5427,8 @@ CONTAINS
       IF( GetLogical( Params,'Constraint Modes Mass Lumping',Found) ) THEN
         CALL CopyBulkMatrix( PSolver % Matrix, BulkMass = .TRUE. ) 
       ELSE
-        CALL CopyBulkMatrix( PSolver % Matrix ) 
+        CALL CopyBulkMatrix( PSolver % Matrix, BulkMass = ASSOCIATED(PSolver % Matrix % MassValues), &
+            BulkDamp = ASSOCIATED(PSolver % Matrix % DampValues) ) 
       END IF
     END IF
 
@@ -5214,7 +5447,11 @@ CONTAINS
     IF( ListGetLogical( Params,'Linear System Remove Zeros',Found ) ) THEN
       CALL CRS_RemoveZeros( PSolver % Matrix )
     END IF	
-
+    
+    IF( ListGetLogical( PSolver % Values,'Boundary Assembly Timing',Found ) ) THEN 
+      CALL ResetTimer('BoundaryAssembly'//GetVarName(PSolver % Variable) ) 
+    END IF
+    
   END SUBROUTINE DefaultFinishBulkAssembly
 
 
@@ -5240,6 +5477,10 @@ CONTAINS
 
     Params => GetSolverParams(PSolver)
 
+    IF( ListGetLogical( Params,'Boundary Assembly Timing',Found ) ) THEN 
+      CALL CheckTimer('BoundaryAssembly'//GetVarName(PSolver % Variable), Level=5, Delete=.TRUE. ) 
+    END IF
+    
     ! Reset colouring 
     PSolver % CurrentBoundaryColour = 0
 
@@ -5887,6 +6128,21 @@ CONTAINS
   END SUBROUTINE GetParentUVW
 !------------------------------------------------------------------------------
 
+
+!> Returns flag telling whether Newton linearization is active
+!------------------------------------------------------------------------------
+  FUNCTION GetNewtonActive( USolver ) RESULT( NewtonActive )
+    LOGICAL :: NewtonActive
+    TYPE(Solver_t), OPTIONAL, TARGET :: USolver
+
+    IF ( PRESENT( USolver ) ) THEN
+      NewtonActive = USolver % NewtonActive
+    ELSE
+      NewtonActive = CurrentModel % Solver % NewtonActive
+    END IF
+  END FUNCTION GetNewtonActive
+
+  
 !-----------------------------------------------------------------------
 !> This routine may be used to terminate the program in the case of an error.
 !-----------------------------------------------------------------------

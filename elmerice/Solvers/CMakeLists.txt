@@ -1,7 +1,38 @@
-SET(WITH_GridDataReader FALSE CACHE BOOL "Include ElmerIce GridDataReader")
+#SET(WITH_GridDataReader FALSE CACHE BOOL "Include ElmerIce GridDataReader")
 SET(WITH_ScatteredDataInterpolator FALSE CACHE BOOL "Include ElmerIce ScatteredDataInterpolator")
-MARK_AS_ADVANCED(WITH_GridDataReader)
+#MARK_AS_ADVANCED(WITH_GridDataReader)
 MARK_AS_ADVANCED(WITH_ScatteredDataInterpolator)
+
+# ---------------------- #
+# -- NetCDF libraries -- #
+#----------------------- #
+MESSAGE(STATUS "------------------------------------------------")
+MESSAGE(STATUS "Elmer/Ice package: Looking for [NetCDF] & [NetCDF Fortran] libraries")
+
+FIND_PACKAGE(NetCDF)
+
+IF(NetCDF_FOUND)
+
+  SET(HAVE_NETCDF TRUE)
+  MARK_AS_ADVANCED(HAVE_NETCDF)
+  INCLUDE_DIRECTORIES(${NetCDF_INCLUDE_DIR})
+  ADD_DEFINITIONS(-DHAVE_NETCDF)
+
+  MESSAGE(STATUS "  NetCDF:           " "${NetCDF_FOUND}")
+  MESSAGE(STATUS "  NetCDF_INC:       " "${NetCDF_INCLUDE_DIR}")
+  MESSAGE(STATUS "  NetCDF_LIBS:     " "${NetCDF_LIBRARIES}")
+ELSE()
+  MESSAGE(STATUS "Library not found: >NetCDF_FOUND< ")
+  MESSAGE(WARNING "  \n Missing: >NetCDF_INCLUDE_DIR< , >NetCDF_LIBRARY<,  >NetCDFF_LIBRARY< \n some functionalities will be disabled")
+ENDIF(NetCDF_FOUND)
+
+
+# ---------------------- #
+# -- LOOK FOR MMG     -- #
+#----------------------- #
+IF(HAVE_MMG)
+  ADD_SUBDIRECTORY(MeshAdaptation_2D)
+ENDIF()
 
 SET(CMAKE_Fortran_MODULE_DIRECTORY
   ${PROJECT_BINARY_DIR}/fmodules CACHE PATH "Directory for Fortran modules")
@@ -28,6 +59,10 @@ SET(ElmerIce_SRC AIFlowSolve_nlD2.F90 AIFlowSolve_nlS2.F90
     CalvingFrontAdvance3D.F90 Emergence.F90 SSAmask.F90 
     GlaDSCoupledSolver.F90 GlaDSchannelSolver.F90 Flotation.F90 )
 
+IF(HAVE_MMG)
+  SET(ElmerIce_SRC ${ElmerIce_SRC} CalvingRemeshMMG.F90)
+ENDIF()
+
 ADD_LIBRARY(ElmerIceSolvers SHARED ${ElmerIce_SRC})
 
 # Library object
@@ -49,18 +84,27 @@ SET_TARGET_PROPERTIES(ElmerIceSolvers PROPERTIES LINK_FLAGS "${CURR_LFLAGS}")
 SET_TARGET_PROPERTIES(ElmerIceSolvers PROPERTIES COMPILE_FLAGS "${CURR_CFLAGS}")
 SET_TARGET_PROPERTIES(ElmerIceSolvers PROPERTIES LINKER_LANGUAGE Fortran)
 IF(NOT(WIN32))
-    SET_TARGET_PROPERTIES(ElmerIceSolvers PROPERTIES 
-                          INSTALL_RPATH ${ELMERSOLVER_RPATH_STRING})
+    SET_TARGET_PROPERTIES(ElmerIceSolvers PROPERTIES
+                          INSTALL_RPATH "${ELMERSOLVER_RPATH_STRING};${ELMER_SOLVER_HOME}/lib/")
+    SET_TARGET_PROPERTIES(ElmerIceSolvers PROPERTIES
+                          INSTALL_RPATH_USE_LINK_PATH TRUE)
 ENDIF()
 TARGET_LINK_LIBRARIES(ElmerIceSolvers elmersolver)
+
+IF(HAVE_NETCDF)
+TARGET_LINK_LIBRARIES(ElmerIceSolvers ${NetCDF_LIBRARIES})
+ENDIF()
+# IF(HAVE_MMG)
+#   TARGET_LINK_LIBRARIES(ElmerIceSolvers ${MMG_LIBRARY})
+#   TARGET_LINK_LIBRARIES(ElmerIceSolvers ElmerIce_MeshAdapt3D)
+# ENDIF()
 
 INSTALL(TARGETS ElmerIceSolvers LIBRARY DESTINATION "share/elmersolver/lib"
 	    RUNTIME DESTINATION "share/elmersolver/lib")
 
-IF(WITH_GridDataReader)
+IF(HAVE_NETCDF)
   ADD_SUBDIRECTORY(GridDataReader)
 ENDIF()
 IF(WITH_ScatteredDataInterpolator)	
   ADD_SUBDIRECTORY(ScatteredDataInterpolator)
 ENDIF()
-ADD_SUBDIRECTORY(MeshAdaptation_2D)

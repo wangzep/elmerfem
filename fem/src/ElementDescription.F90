@@ -567,6 +567,7 @@ CONTAINS
 !     Local variables
 !------------------------------------------------------------------------------
       TYPE(Nodes_t) :: Nodes
+      INTEGER :: sdim
       TYPE(Element_t), POINTER :: Elm
 !------------------------------------------------------------------------------
       element => ElementTypeList
@@ -600,8 +601,12 @@ CONTAINS
         Nodes % x => Element % NodeU
         Nodes % y => Element % NodeV
         Nodes % z => Element % NodeW
+
+        sdim = CurrentModel % Dimension
+        CurrentModel % Dimension = Element % Dimension
         CALL StabParam( Elm, Nodes, Element % NumberOfNodes, &
                  Element % StabilizationMK )
+        CurrentModel % Dimension = sdim
 
         DEALLOCATE(Elm)
       END IF
@@ -2432,7 +2437,7 @@ END IF
         END IF
 
         ! Bubbles of P Pyramid
-        IF (Element % BDOFs >= 0) THEN 
+        IF (Element % BDOFs > 0) THEN 
            ! Get element p
            p = Element % PDefs % p
            nb = MAX( GetBubbleDOFs(Element, p), Element % BDOFs )
@@ -2622,7 +2627,8 @@ END IF
 !>  (=sqrt(det(J^TJ))) related to the mapping f.
 !------------------------------------------------------------------------------
    RECURSIVE FUNCTION ElementInfo( Element, Nodes, u, v, w, detJ, &
-     Basis, dBasisdx, ddBasisddx, SecondDerivatives, Bubbles, BasisDegree, EdgeBasis, RotBasis ) RESULT(stat)
+       Basis, dBasisdx, ddBasisddx, SecondDerivatives, Bubbles, BasisDegree, &
+       EdgeBasis, RotBasis, USolver ) RESULT(stat)
 !------------------------------------------------------------------------------
      IMPLICIT NONE
 
@@ -2638,6 +2644,7 @@ END IF
      INTEGER, OPTIONAL :: BasisDegree(:)            !< Degree of each basis function in Basis(:) vector. 
 	                                                !! May be used with P element basis functions
      LOGICAL, OPTIONAL :: SecondDerivatives         !< Are the second derivatives needed? (still present for historical reasons)
+     TYPE(Solver_t), POINTER, OPTIONAL :: USolver   !< The solver used to call the basis functions. 
      LOGICAL, OPTIONAL :: Bubbles                   !< Are the bubbles to be avaluated.
      REAL(KIND=dp), OPTIONAL :: EdgeBasis(:,:)      !< If present, the values of H(curl)-conforming basis functions B(f(p))
      REAL(KIND=dp), OPTIONAL :: RotBasis(:,:)       !< The referencial description of the spatial curl of B
@@ -2645,7 +2652,7 @@ END IF
 !------------------------------------------------------------------------------
 !    Local variables
 !------------------------------------------------------------------------------
-
+     TYPE(Solver_t), POINTER :: PSolver => NULL()
      REAL(KIND=dp) :: BubbleValue, dBubbledx(3), t, s, LtoGMap(3,3)
      LOGICAL :: invert, degrees
      INTEGER :: i, j, k, l, q, p, f, n, nb, dim, cdim, locali, localj,  &
@@ -2657,10 +2664,36 @@ END IF
 
      TYPE(Element_t) :: Bubble
      TYPE(Element_t), POINTER :: Edge, Face
+     INTEGER :: EdgeBasisDegree
+     LOGICAL :: PerformPiolaTransform, Found
+     
+     SAVE PSolver, EdgeBasisDegree, PerformPiolaTransform
 !------------------------------------------------------------------------------
-     IF(PRESENT(EdgeBasis)) THEN
-       stat = EdgeElementInfo(Element,Nodes,u,v,w,detF=Detj,Basis=Basis, &
-            EdgeBasis=EdgeBasis,RotBasis=RotBasis,dBasisdx=dBasisdx,ApplyPiolaTransform=.TRUE.)
+     IF(PRESENT(EdgeBasis)) THEN       
+       IF( PRESENT( USolver ) ) THEN
+         IF( .NOT. ASSOCIATED( USolver, PSolver ) ) THEN
+           IF( ListGetLogical(USolver % Values,'Quadratic Approximation', Found ) ) THEN
+             EdgeBasisDegree = 2
+             PerformPiolaTransform = .TRUE.
+           ELSE
+             EdgeBasisDegree = 1
+             PerformPiolaTransform = ListGetLogical(USolver % Values,'Use Piola Transform', Found )
+           END IF
+           PSolver => USolver 
+         END IF
+       ELSE
+         EdgeBasisDegree = 1
+         PerformPiolaTransform = .TRUE.        
+       END IF
+       IF( PerformPiolaTransform ) THEN       
+         stat = EdgeElementInfo(Element,Nodes,u,v,w,detF=Detj,Basis=Basis, &
+             EdgeBasis=EdgeBasis,RotBasis=RotBasis,dBasisdx=dBasisdx,&
+             BasisDegree = EdgeBasisDegree, ApplyPiolaTransform = PerformPiolaTransform )
+       ELSE
+         ! Is this really necessary to call in case no piola version? 
+         stat = ElementInfo( Element, Nodes, u, v, w, detJ, Basis, dBasisdx )
+         CALL GetEdgeBasis(Element,EdgeBasis,RotBasis,Basis,dBasisdx)         
+       END IF
        RETURN
      END IF
 
@@ -3056,7 +3089,7 @@ END IF
         END IF
 
         ! Bubbles of P Pyramid
-        IF (Element % BDOFs >= 0) THEN 
+        IF (Element % BDOFs > 0) THEN 
            ! Get element p
            p = Element % PDefs % p
            nb = MAX( GetBubbleDOFs(Element, p), Element % BDOFs )
@@ -3665,9 +3698,11 @@ END IF
            FaceDirection(H1Basis_MaxPElementFaceNodes,H1Basis_MaxPElementFaces)
 
      INTEGER :: cdim, dim, i, j, k, l, ll, lln, ncl, ip, n, p, &
-           nbp, nbdxp, allocstat, ncpad, EdgeMaxDegree, FaceMaxDegree
+           nbp, nbq, nbdxp, allocstat, ncpad, EdgeMaxDegree, FaceMaxDegree
+
 
      LOGICAL :: invertBubble, elem
+ 
 !DIR$ ATTRIBUTES ALIGN:64::EdgeDegree, FaceDegree
 !DIR$ ATTRIBUTES ALIGN:64::EdgeDirection, FaceDirection
 !DIR$ ASSUME_ALIGNED uWrk:64, vWrk:64, wWrk:64, BasisWrk:64, dBasisdxWrk:64, DetJWrk:64, LtoGMapsWrk:64
@@ -3731,7 +3766,7 @@ END IF
          ! Compute local first derivatives
          CALL H1Basis_dTriangleNodalP(ncl, uWrk, vWrk, nbmax, dBasisdxWrk, nbdxp)
 
-         IF (ASSOCIATED( Element % EdgeIndexes )) THEN
+         IF (ASSOCIATED( Element % EdgeIndexes)) THEN
            ! For first round of blocked loop, compute polynomial degrees and 
            ! edge directions
            IF (ll==1) THEN
@@ -3740,11 +3775,14 @@ END IF
            END IF
 
            ! Compute basis function values
-           IF (EdgeMaxDegree > 1) THEN
-             CALL H1Basis_TriangleEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, BasisWrk, &
-                   nbp, EdgeDirection)
-             CALL H1Basis_dTriangleEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, dBasisdxWrk, &
-                   nbdxp, EdgeDirection)
+           IF (EdgeMaxDegree>1 ) THEN
+             nbq = nbp + SUM(EdgeDegree(1:3)-1)
+             IF(nbmax >= nbq ) THEN
+               CALL H1Basis_TriangleEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, BasisWrk, &
+                     nbp, EdgeDirection)
+               CALL H1Basis_dTriangleEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, dBasisdxWrk, &
+                     nbdxp, EdgeDirection)
+             END IF
            END IF
          END IF
 
@@ -3792,10 +3830,13 @@ END IF
 
            ! Compute basis function values
            IF (EdgeMaxDegree > 1) THEN
-             CALL H1Basis_QuadEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
-                   EdgeDirection)
-             CALL H1Basis_dQuadEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
-                   EdgeDirection)
+             nbq = nbp + SUM(EdgeDegree(1:4)-1)
+             IF(nbmax >= nbq) THEN
+               CALL H1Basis_QuadEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
+                     EdgeDirection)
+               CALL H1Basis_dQuadEdgeP(ncl, uWrk, vWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
+                     EdgeDirection)
+             END IF
            END IF
          END IF
 
@@ -3840,7 +3881,9 @@ END IF
            IF (ll==1) THEN
              ! Get polynomial degree of each edge
              EdgeMaxDegree = 0
-             IF (CurrentModel % Solver % Mesh % MinEdgeDOFs == &
+             IF( CurrentModel % Solver % Mesh % MaxEdgeDofs == 0 ) THEN
+               CONTINUE             
+             ELSE IF (CurrentModel % Solver % Mesh % MinEdgeDOFs == &
                    CurrentModel % Solver % Mesh % MaxEdgeDOFs) THEN
                EdgeMaxDegree = Element % BDOFs+1
                EdgeDegree(1:Element % Type % NumberOfFaces) = EdgeMaxDegree
@@ -3860,10 +3903,13 @@ END IF
 
            ! Compute basis function values
            IF (EdgeMaxDegree > 1) THEN
-             CALL H1Basis_TetraEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
-                   EdgeDirection)
-             CALL H1Basis_dTetraEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
-                   EdgeDirection)
+             nbq = nbp + SUM(EdgeDegree(1:6)-1)
+             IF(nbmax >= nbq) THEN
+               CALL H1Basis_TetraEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
+                     EdgeDirection)
+               CALL H1Basis_dTetraEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
+                     EdgeDirection)
+             END IF
            END IF
          END IF
 
@@ -3873,7 +3919,10 @@ END IF
            IF (ll==1) THEN
              ! Get polynomial degree of each face
              FaceMaxDegree = 0
-             IF (CurrentModel % Solver % Mesh % MinFaceDOFs == &
+
+             IF( CurrentModel % Solver % Mesh % MaxFaceDofs == 0 ) THEN
+               CONTINUE             
+             ELSE IF (CurrentModel % Solver % Mesh % MinFaceDOFs == &
                    CurrentModel % Solver % Mesh % MaxFaceDOFs) THEN
                FaceMaxDegree = CurrentModel % Solver % Mesh % Faces( Element % FaceIndexes(1) ) % PDefs % P
                FaceDegree(1:Element % Type % NumberOfFaces) = FaceMaxDegree
@@ -3890,18 +3939,26 @@ END IF
                END DO
              END IF
 
-             ! Tetrahedral directions are enforced by tetra element types
              IF (FaceMaxDegree > 1) THEN
                CALL H1Basis_GetTetraFaceDirection(Element % PDefs % TetraType, FaceDirection)
              END IF
            END IF
 
            ! Compute basis function values
-           IF (FaceMaxDegree > 1) THEN
-             CALL H1Basis_TetraFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, BasisWrk, nbp, &
-                   FaceDirection)
-             CALL H1Basis_dTetraFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, dBasisdxWrk, nbdxp, &
-                   FaceDirection)
+           IF (FaceMaxDegree>1 ) THEN
+             nbq = nbp
+             DO i=1,4
+               DO j=0,FaceDegree(i)
+                  nbq = nbq + MAX(FaceDegree(i)-j-2,0)
+               END DO
+             END DO
+  
+             IF (nbmax >= nbq ) THEN
+               CALL H1Basis_TetraFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, BasisWrk, nbp, &
+                     FaceDirection)
+               CALL H1Basis_dTetraFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, dBasisdxWrk, nbdxp, &
+                     FaceDirection)
+             END IF
            END IF
          END IF
 
@@ -3916,6 +3973,136 @@ END IF
            CALL H1Basis_TetraBubbleP(ncl, uWrk, vWrk, wWrk, P, nbmax, BasisWrk, nbp)
            CALL H1Basis_dTetraBubbleP(ncl, uWrk, vWrk, wWrk, P, nbmax, dBasisdxWrk, nbdxp)
          END IF
+
+         ! TEMPORARY NONVECTORIZED PYRAMID
+       CASE (605)
+BLOCK
+         INTEGER ::  F, locali, localj, nb, q, tmp(4), direction(4)
+         LOGICAL :: invert
+         TYPE(Element_t), POINTER :: Face, Edge
+
+         dBasisdxWrk(1:ncl,:,:) = 0.0d0
+         BasisWrk(1:ncl,:) = 0.0d0
+         DO l=1,ncl
+           CALL NodalBasisFunctions(5, BasisWrk(l,:), element, uWrk(l), vWrk(l), wWrk(l))
+           CALL NodalFirstDerivatives(5, dBasisdxWrk(l,:,:), element, uWrk(l), vWrk(l), wWrk(l) )
+
+           q = 5
+
+           ! Edges of P Pyramid
+           IF (ASSOCIATED( Element % EdgeIndexes ) ) THEN
+             ! For each edge in wedge, calculate values of edge functions
+             DO i=1,8
+                Edge => CurrentModel % Solver % Mesh % Edges( Element % EdgeIndexes(i) )
+ 
+                ! Do not solve edge dofs, if there is not any
+                IF (Edge % BDOFs <= 0) CYCLE
+              
+                ! Get local indexes of current edge
+                tmp(1:2) = getPyramidEdgeMap(i)
+                locali = tmp(1)
+                localj = tmp(2)
+
+                ! Determine edge direction
+                invert = .FALSE.
+              
+                ! Invert edge if local first node has greater global index than second one
+                IF ( Element % NodeIndexes(locali) > Element % NodeIndexes(localj) ) invert = .TRUE.
+
+                ! For each DOF in edge calculate values of edge functions
+                ! and their derivatives for edge=i and i=k+1
+                DO k=1,Edge % BDOFs
+                   IF ( q >= SIZE(BasisWrk,2) ) CYCLE
+                   q = q + 1
+
+                   ! Get values of edge basis functions and their derivatives
+                   BasisWrk(l,q) = PyramidEdgePBasis(i,k+1,uwrk(l),vwrk(l),wwrk(l),invert)
+                   dBasisdxWrk(l,q,1:3) = dPyramidEdgePBasis(i,k+1,uwrk(l),vwrk(l),wwrk(l),invert)
+                END DO
+             END DO
+           END IF
+        
+           ! Faces of P Pyramid
+           IF ( ASSOCIATED( Element % FaceIndexes ) ) THEN
+              ! For each face in pyramid, calculate values of face functions
+              DO F=1,5
+                 Face => CurrentModel % Solver % Mesh % Faces( Element % FaceIndexes(F) )
+
+                 ! Do not solve face dofs, if there is not any
+                 IF ( Face % BDOFs <= 0) CYCLE
+              
+                 ! Get face p
+                 p = Face % PDefs % P 
+              
+                 ! Handle triangle and square faces separately
+                 SELECT CASE(F)
+                 CASE (1)
+                    direction = 0
+                    ! Get global direction vector for enforcing parity
+                    tmp(1:4) = getPyramidFaceMap(F)
+                    direction(1:4) = getSquareFaceDirection( Element, tmp(1:4) )
+                 
+                    ! For each face calculate values of functions from index
+                    ! pairs i,j=2,..,p-2 i+j=4,..,p
+                    DO i=2,p-2
+                       DO j=2,p-i
+                          IF ( q >= SIZE(BasisWrk,2) ) CYCLE
+                          q = q + 1
+                       
+                          BasisWrk(l,q) = PyramidFacePBasis(F,i,j,uwrk(l),vwrk(l),wwrk(l),direction)
+                          dBasisdxWrk(l,q,:) = dPyramidFacePBasis(F,i,j,uwrk(l),vwrk(l),wwrk(l),direction)
+                       END DO
+                    END DO
+
+                 CASE (2,3,4,5)
+                    direction = 0
+                    ! Get global direction vector for enforcing parity
+                    tmp(1:4) = getPyramidFaceMap(F) 
+                    direction(1:3) = getTriangleFaceDirection( Element, tmp(1:3) )
+                 
+                    ! For each face calculate values of functions from index
+                    ! pairs i,j=0,..,p-3 i+j=0,..,p-3
+                    DO i=0,p-3
+                       DO j=0,p-i-3
+                          IF ( q >= SIZE(BasisWrk,2) ) CYCLE
+                          q = q + 1
+
+                          BasisWrk(l,q) = PyramidFacePBasis(F,i,j,uwrk(l),vwrk(l),wwrk(l),direction)
+                          dBasisdxWrk(l,q,:) = dPyramidFacePBasis(F,i,j,uwrk(l),vwrk(l),wwrk(l),direction)
+                       END DO
+                    END DO
+                 END SELECT    
+              END DO
+           END IF
+
+           ! Bubbles of P Pyramid
+           IF (Element % BDOFs > 0) THEN 
+              ! Get element p
+              p = Element % PDefs % p
+              nb = MAX( GetBubbleDOFs(Element, p), Element % BDOFs )
+              p=CEILING(1/3d0*(81*nb+3*SQRT(-3d0+729*nb**2))**(1/3d0)+1d0/ &
+                      (81*nb+3*SQRT(-3d0+729*nb**2))**(1/3d0)+2)
+
+              ! Calculate value of bubble functions from indexes
+              ! i,j,k=0,..,p-4 i+j+k=0,..,p-4
+              DO i=0,p-4
+                 DO j=0,p-i-4
+                    DO k=0,p-i-j-4
+                       IF ( q >= SIZE(BasisWrk,2)) CYCLE
+                       q = q + 1
+ 
+                       BasisWrk(l,q) = PyramidBubblePBasis(i,j,k,uwrk(l),vwrk(l),wwrk(l))
+                       dBasisdxWrk(l,q,:) = dPyramidBubblePBasis(i,j,k,uwrk(l),vwrk(l),wwrk(l))
+                    END DO
+                 END DO
+              END DO
+           END IF
+         END DO
+         
+         nbp = q
+!------------------------------------------------------------------------------
+END BLOCK
+
 
          ! WEDGE
        CASE (706)
@@ -3933,11 +4120,14 @@ END IF
            END IF
 
            ! Compute basis function values
-           IF (EdgeMaxDegree > 1) THEN
-             CALL H1Basis_WedgeEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
-                   EdgeDirection)
-             CALL H1Basis_dWedgeEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
-                   EdgeDirection)
+           IF (EdgeMaxDegree > 1)THEN
+             nbq = nbp+SUM(EdgeDegree(1:9)-1)
+             IF(nbmax >= nbq) THEN
+               CALL H1Basis_WedgeEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
+                     EdgeDirection)
+               CALL H1Basis_dWedgeEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
+                     EdgeDirection)
+             END IF
            END IF
          END IF
 
@@ -3950,11 +4140,27 @@ END IF
            END IF
 
            ! Compute basis function values
-           IF (FaceMaxDegree > 1) THEN
-             CALL H1Basis_WedgeFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, BasisWrk, nbp, &
-                   FaceDirection)
-             CALL H1Basis_dWedgeFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, dBasisdxWrk, nbdxp, &
-                   FaceDirection)
+           IF (FaceMaxDegree > 1 ) THEN
+             nbq = nbp
+             ! Triangle faces
+             DO i=1,2
+               DO j=0,FaceDegree(i)-3
+                 nbq = nbq + MAX(FaceDegree(i)-j-2,0)
+               END DO
+             END DO
+             ! Square faces
+             DO i=3,5
+               DO j=2,FaceDegree(i)-2
+                 nbq = nbq + MAX(FaceDegree(i)-j-1,0)
+               END DO
+             END DO
+             
+             IF(nbmax >= nbq) THEN
+               CALL H1Basis_WedgeFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, BasisWrk, nbp, &
+                     FaceDirection)
+               CALL H1Basis_dWedgeFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, dBasisdxWrk, nbdxp, &
+                     FaceDirection)
+             END IF
            END IF
          END IF
 
@@ -3987,12 +4193,16 @@ END IF
 
            ! Compute basis function values
            IF (EdgeMaxDegree > 1) THEN
-             CALL H1Basis_BrickEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
-                   EdgeDirection)
-             CALL H1Basis_dBrickEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
-                   EdgeDirection)
+             nbq = nbp + SUM(EdgeDegree(1:12)-1)
+             IF(nbmax >= nbq) THEN
+               CALL H1Basis_BrickEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, BasisWrk, nbp, &
+                     EdgeDirection)
+               CALL H1Basis_dBrickEdgeP(ncl, uWrk, vWrk, wWrk, EdgeDegree, nbmax, dBasisdxWrk, nbdxp, &
+                     EdgeDirection)
+             END IF
            END IF
          END IF
+
 
          IF (ASSOCIATED( Element % FaceIndexes )) THEN
            ! For first round of blocked loop, compute polynomial degrees and 
@@ -4004,24 +4214,34 @@ END IF
 
            ! Compute basis function values
            IF (FaceMaxDegree > 1) THEN
-             CALL H1Basis_BrickFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, BasisWrk, nbp, &
-                   FaceDirection)
-             CALL H1Basis_dBrickFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, dBasisdxWrk, nbdxp, &
-                   FaceDirection)
+             nbq = nbp
+             DO i=1,6
+               DO j=2,FaceDegree(i)
+                 nbq = nbq + MAX(FaceDegree(i)-j-1,0)
+               END DO
+             END DO
+
+             IF(nbmax >= nbq) THEN
+               CALL H1Basis_BrickFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, BasisWrk, nbp, &
+                     FaceDirection)
+               CALL H1Basis_dBrickFaceP(ncl, uWrk, vWrk, wWrk, FaceDegree, nbmax, dBasisdxWrk, nbdxp, &
+                     FaceDirection)
+             END IF
            END IF
          END IF
 
+         
          ! Element bubble functions
          IF (Element % BDOFS > 0) THEN 
            ! Compute P from bubble dofs
            P=CEILING(1/3d0*(81*Element % BDOFS + &
                  3*SQRT(-3d0+729*Element % BDOFS**2))**(1/3d0) + &
                  1d0/(81*Element % BDOFS+3*SQRT(-3d0+729*Element % BDOFS**2))**(1/3d0)+4)
-
            CALL H1Basis_BrickBubbleP(ncl, uWrk, vWrk, wWrk, P, nbmax, BasisWrk, nbp)
            CALL H1Basis_dBrickBubbleP(ncl, uWrk, vWrk, wWrk, P, nbmax, dBasisdxWrk, nbdxp)
          END IF
 
+         
        CASE DEFAULT
          WRITE( Message, '(a,i4,a)' ) 'Vectorized basis for element: ', &
                Element % TYPE % ElementCode, ' not implemented.'
@@ -4059,6 +4279,7 @@ END IF
          CALL ElementInfoVec_ElementBasisToGlobal(ncl, nbp, nbmax, dBasisdxWrk, dim, cdim, LtoGMapsWrk, ll, dBasisdx)
        END IF
      END DO ! Block over Gauss points
+
   CONTAINS
    
      SUBROUTINE GetElementMeshEdgeInfo(Mesh, Element, EdgeDegree, EdgeDirection, EdgeMaxDegree)
@@ -4072,7 +4293,11 @@ END IF
        INTEGER :: i
 
        EdgeMaxDegree = 0
-       IF (Mesh % MinEdgeDOFs == Mesh % MaxEdgeDOFs) THEN
+
+       IF( Mesh % MaxEdgeDofs == 0 ) THEN
+         CONTINUE             
+
+       ELSE IF (Mesh % MinEdgeDOFs == Mesh % MaxEdgeDOFs) THEN
           EdgeDegree(1:Element % Type % NumberOfEdges) = Mesh % MaxEdgeDOFs + 1
           EdgeMaxDegree = Mesh % MaxEdgeDOFs + 1
        ELSE
@@ -4105,7 +4330,11 @@ END IF
 
        ! Get polynomial degree of each face
        FaceMaxDegree = 0
-       IF (Mesh % MinFaceDOFs == Mesh % MaxFaceDOFs) THEN
+       
+       IF( Mesh % MaxFaceDofs == 0 ) THEN
+         CONTINUE              
+
+       ELSE IF (Mesh % MinFaceDOFs == Mesh % MaxFaceDOFs) THEN
           FaceMaxDegree = Mesh % Faces( Element % FaceIndexes(1) ) % PDefs % P
           FaceDegree(1:Element % Type % NumberOfFaces) = FaceMaxDegree
        ELSE
@@ -5134,12 +5363,12 @@ END IF
        REAL(KIND=dp) :: t(3), s(3), v1, v2, v3, h1, h2, h3, dh1, dh2, dh3, grad(2)
        REAL(KIND=dp) :: LBasis(Element % TYPE % NumberOfNodes), Beta(4), EdgeSign(16)
        LOGICAL :: Create2ndKindBasis, PerformPiolaTransform, UsePretabulatedBasis, Parallel
-       LOGICAL :: SecondOrder, ApplyTraceMapping
+       LOGICAL :: SecondOrder, ApplyTraceMapping, Found
        INTEGER, POINTER :: EdgeMap(:,:), Ind(:)
        INTEGER :: TriangleFaceMap(3), SquareFaceMap(4), BrickFaceMap(6,4), PrismSquareFaceMap(3,4), DOFs
 !----------------------------------------------------------------------------------------------------------
+
        Mesh => CurrentModel % Solver % Mesh
-       !Parallel = ParEnv % PEs>1
        Parallel = ASSOCIATED(Mesh % ParallelInfo % Interface)
 
        stat = .TRUE.
@@ -5167,7 +5396,7 @@ END IF
        END IF
        PerformPiolaTransform = .FALSE.
        IF ( PRESENT(ApplyPiolaTransform) ) PerformPiolaTransform = ApplyPiolaTransform
-
+       
        ApplyTraceMapping = .FALSE.
        IF ( PRESENT(TangentialTrMapping) ) ApplyTraceMapping = TangentialTrMapping
        !-------------------------------------------------------------------------------------------
@@ -11118,25 +11347,24 @@ END IF
     REAL(KIND=dp), ALLOCATABLE :: Passive(:)
     INTEGER :: body_id, bf_id, nlen, NbrNodes,PassNodes, LimitNodes
     LOGICAL :: Found
-    CHARACTER(LEN=MAX_NAME_LEN) :: PassName, PrevPassName
+    CHARACTER(LEN=MAX_NAME_LEN) :: PassName
     LOGICAL :: NoPassiveElements = .FALSE.
-
-    SAVE Passive, PrevPassName, NoPassiveElements
-    !$OMP THREADPRIVATE(Passive, PrevPassName, NoPassiveElements)
+    TYPE(Solver_t), POINTER :: pSolver, PrevSolver => NULL()
+    
+    SAVE Passive, NoPassiveElements, PrevSolver, PassName
+    !$OMP THREADPRIVATE(Passive, NoPassiveElements, PrevSolver, PassName)
     !------------------------------------------------------------------------------
     IsPassive = .FALSE.
-
-
-    nlen = CurrentModel % Solver % Variable % NameLen
-    PassName = GetVarName(CurrentModel % Solver % Variable) // ' Passive'     
-
-    IF( PassName(1:nlen) == PrevPassName(1:nlen) ) THEN
-      IF( NoPassiveElements ) RETURN
-    ELSE
+    pSolver => CurrentModel % Solver
+    
+    IF( .NOT. ASSOCIATED( pSolver, PrevSolver ) ) THEN
+      PrevSolver => pSolver          
+      nlen = CurrentModel % Solver % Variable % NameLen
+      PassName = GetVarName(CurrentModel % Solver % Variable) // ' Passive'     
       NoPassiveElements = .NOT. ListCheckPresentAnyBodyForce( CurrentModel, PassName )
-      PrevPassName = PassName
-      IF( NoPassiveElements ) RETURN       
     END IF
+    
+    IF( NoPassiveElements ) RETURN       
 
     IF (PRESENT(UElement)) THEN
       Element => UElement

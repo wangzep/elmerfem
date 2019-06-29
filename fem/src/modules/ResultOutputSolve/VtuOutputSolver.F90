@@ -32,6 +32,7 @@ SUBROUTINE VtuOutputSolver( Model,Solver,dt,TransientSimulation )
 
   USE DefUtils 
   USE MeshUtils
+  USE MainUtils
   USE ElementDescription
   USE AscBinOutputUtils
   
@@ -181,6 +182,7 @@ SUBROUTINE VtuOutputSolver( Model,Solver,dt,TransientSimulation )
   ! Halo exists only in parallel
   IF( Parallel ) THEN
     SkipHalo = GetLogical( Params,'Skip Halo Elements', GotIt )
+    IF(.NOT. GotIt) SkipHalo = .TRUE.
     SaveOnlyHalo = GetLogical( Params,'Save Halo Elements Only', GotIt )
   ELSE
     SkipHalo = .FALSE.
@@ -386,15 +388,21 @@ SUBROUTINE VtuOutputSolver( Model,Solver,dt,TransientSimulation )
     END IF
   END IF
 
-
-
+  
   ! If we have a discontinuous mesh then create the permutation vectors to deal with the discontinuities.
   IF( DG .OR. DN ) THEN
     NoPermutation = .FALSE.
 
+    ! Sometimes we have a request to save in DG format even though no equation has been solved as dg.
+    ! Then we need to create the Element % DgIndexes for the saving only. If already done this does nothing.
+    CALL CheckAndCreateDGIndexes( Mesh, ActiveElem ) 
+    
     IF( DN ) THEN      
+      CALL Info('VtuOutputSolver','Saving results as discontinuous over bodies',Level=15)
       CALL AverageBodyFields( Mesh )  
       ALLOCATE( BodyVisited( Mesh % NumberOfNodes ) )
+    ELSE
+      CALL Info('VtuOutputSolver','Saving results as discontinuous DG fields',Level=15)
     END IF
 
     k = 0
@@ -957,6 +965,171 @@ CONTAINS
   END SUBROUTINE AverageBodyFields
 
 
+  SUBROUTINE Ip2DgField( Element, nip, fip, ndg, fdg )
+    !------------------------------------------------------------------------------
+    TYPE(Element_t), POINTER :: Element
+    INTEGER :: nip, ndg
+    REAL(KIND=dp) :: fip(:), fdg(:)
+!------------------------------------------------------------------------------
+    REAL(KIND=dp) :: Weight, DetJ
+    REAL(KIND=dp), ALLOCATABLE :: Basis(:), MASS(:,:), LOAD(:)
+    INTEGER :: i,t,p,q
+    TYPE(GaussIntegrationPoints_t) :: IP
+    TYPE(Nodes_t) :: Nodes
+    TYPE(Mesh_t), POINTER :: Mesh
+    LOGICAL :: Stat, AllocationsDone = .FALSE.
+
+    SAVE Nodes, Basis, MASS, LOAD, AllocationsDone
+!------------------------------------------------------------------------------
+
+    Mesh => GetMesh()
+    IF( .NOT. AllocationsDone ) THEN
+      n = Mesh % MaxElementNodes
+      ALLOCATE( Basis(n), LOAD(n), MASS(n,n) )
+      AllocationsDone = .TRUE.
+    END IF
+    
+    n = GetElementNOFNodes( Element ) 
+    IF( n /= ndg ) CALL Fatal('Ip2DgField','Mismatch in sizes!')
+
+    CALL GetElementNodes( Nodes, Element )
+    MASS  = 0._dp
+    LOAD = 0._dp
+
+    ! Numerical integration:
+    !-----------------------
+    IP = GaussPoints( Element, nip )
+    DO t=1,IP % n
+      stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), IP % W(t), detJ, Basis )
+      Weight = IP % s(t) * DetJ
+
+      DO p=1,n
+        LOAD(p) = LOAD(p) + Weight * Basis(p) * fip(t)
+        DO q=1,n
+          MASS(p,q) = MASS(p,q) + Weight * Basis(q) * Basis(p)
+        END DO
+      END DO
+    END DO
+
+    CALL LuSolve(n,MASS,LOAD) 
+    
+    fdg(1:n) = LOAD(1:n)
+    
+  END SUBROUTINE Ip2DgField
+
+
+
+
+  SUBROUTINE Ip2DgSwapper( Var ) 
+
+    TYPE( Variable_t), POINTER :: Var
+    TYPE( Variable_t), TARGET :: TmpVar
+    LOGICAL :: Visited = .FALSE.
+    INTEGER :: dgsize,ipsize,varsize,dofs,i,j,k,n,m,e,t,allocstat
+    TYPE(Element_t), POINTER :: Element
+    REAL(KIND=dp) :: fip(32),fdg(32)
+    
+    SAVE TmpVar, Visited
+
+    IF( Var % TYPE /= Variable_on_gauss_points ) RETURN
+
+    CALL Info('VtuOutputSolver','Swapping variable from ip to dg:'//TRIM(Var % Name),Level=8)
+    
+    dofs = Var % Dofs
+    n = SIZE( Var % Values ) 
+
+    ! Inherit stuff from the primary field to temporal field
+    TmpVar % Name = Var % Name
+    TmpVar % Dofs = Var % Dofs
+    TmpVar % Type = Variable_on_nodes_on_elements
+    
+    ! Calculate the sizes
+    dgsize = 0
+    ipsize = 0
+    varsize = 0
+    DO t=1,Mesh % NumberOfBulkElements
+      Element => Mesh % Elements(t)
+      n = Element % Type % NumberOfNodes
+      dgsize = dgsize + n 
+
+      j = Element % ElementIndex
+      m = Var % Perm(j+1) - Var % Perm(j)
+      ipsize = ipsize + m
+
+      IF( m > 0 ) varsize = varsize + n
+    END DO
+
+    CALL Info('VtuOutputSolver','Sizes for dg, ip and var: '&
+        //TRIM(I2S(dgsize))//', '//TRIM(I2S(ipsize))//', '//TRIM(I2S(varsize)),Level=20)
+   
+    IF(ASSOCIATED( TmpVar % Perm ) ) THEN
+      IF( SIZE( TmpVar % Perm ) < dgsize ) DEALLOCATE( TmpVar % Perm )
+    END IF
+    IF(.NOT. ASSOCIATED( TmpVar % Perm ) ) THEN
+      ALLOCATE( TmpVar % Perm(dgsize), STAT=allocstat )
+      IF( allocstat /= 0 ) CALL Fatal('VtuOutputSolver','Allocation error for TmpVar % Perm')
+    END IF
+    TmpVar % Perm = 0 
+
+    IF(ASSOCIATED( TmpVar % Values ) ) THEN
+      IF( SIZE( TmpVar % Values ) < varsize * dofs ) DEALLOCATE( TmpVar % Values )
+    END IF
+    IF(.NOT. ASSOCIATED( TmpVar % Values ) ) THEN
+      ALLOCATE( TmpVar % Values(varsize * dofs), STAT=allocstat)
+      IF( allocstat /= 0 ) CALL Fatal('VtuOutputSolver','Allocation error for TmpVar % Values')      
+    END IF
+    TmpVar % Values = 0 
+
+    ! Number the permutation in the temporal variable
+    DO t=1,Mesh % NumberOfBulkElements
+      Element => Mesh % Elements(t)
+      n = Element % Type % NumberOfNodes            
+      e = Element % ElementIndex
+      m = Var % Perm(e+1) - Var % Perm(e)
+
+      IF( m == 0 ) CYCLE
+      TmpVar % Perm( Element % DgIndexes ) = 1
+    END DO
+
+    j = 0
+    DO i = 1, dgsize
+      IF( TmpVar % Perm( i ) == 0 ) CYCLE
+      j = j + 1
+      TmpVar % Perm( i ) = j
+    END DO
+    IF( j /= varsize ) CALL Fatal('VtuOutputSolver','Inconsistent sizes in numbering')
+        
+    DO t=1,Mesh % NumberOfBulkElements
+      Element => Mesh % Elements(t)
+      n = Element % Type % NumberOfNodes            
+      e = Element % ElementIndex
+      m = Var % Perm(e+1) - Var % Perm(e)
+
+      IF( m == 0 ) CYCLE 
+
+      DO k=1,dofs
+        DO i=1,m        
+          j = Var % Perm(t) + i 
+          fip(i) = Var % Values(dofs*(j-1)+k)
+        END DO
+        
+        CALL Ip2DgField( Element, m, fip, n, fdg )
+        
+        DO i=1,n        
+          j = TmpVar % Perm( Element % DgIndexes(i) )
+          TmpVar % Values(dofs*(j-1)+k) = fdg(i)
+        END DO
+      END DO
+    END DO
+
+    Var => TmpVar
+
+    CALL Info('VtuOutputSolver','Swapping variable from ip to dg done',Level=20)
+    
+  END SUBROUTINE Ip2DgSwapper
+    
+
+  
 
   ! Writes a single VTU file that can be read by Paraview, ViSiT etc.
   !---------------------------------------------------------------------------------------
@@ -1004,7 +1177,8 @@ CONTAINS
     Params => GetSolverParams()
     Buffered = .TRUE.
 
-    ALLOCATE( ElemInd(Model % Mesh % MaxElementDOFS))
+    ! we could have huge amount of gauss points
+    ALLOCATE( ElemInd(512)) !Model % Mesh % MaxElementDOFS))
 
     ! This is a hack to ensure that the streamed saving will cover the whole file
     !----------------------------------------------------------------------------
@@ -1122,9 +1296,13 @@ CONTAINS
           ELSE IF( VarType == Variable_on_elements ) THEN
             CYCLE
           ELSE IF( VarType == Variable_on_gauss_points ) THEN
-            CYCLE
+            IF ( DG ) THEN
+              CALL Ip2DgSwapper( Solution )
+            ELSE
+              CYCLE
+            END IF
           END IF
-
+            
           ! Default is to save the field only once
           NoFields = 0
           NoFields2 = 0
@@ -1191,20 +1369,22 @@ CONTAINS
 
             IF( NoModes + NoModes2 == 0 ) NoFields = 1
           END IF
-
-
+          
           Perm => Solution % Perm
           dofs = Solution % DOFs
           Values => Solution % Values
           VarType = Solution % Type
-          
+                    
           !---------------------------------------------------------------------
           ! Some vectors are defined by a set of components (either 2 or 3)
           !---------------------------------------------------------------------
           IF( ComponentVector ) THEN
-
             IF( NoModes + NoModes2 > 0 ) THEN
               CALL Warn('WriteVtuXMLFile','Modes cannot currently be given componentwise!')
+              CYCLE
+            END IF
+            IF( VarType == Variable_on_gauss_points ) THEN
+              CALL Warn('WriteVtuXMLFile','Gauss point variables cannot currently be given componentwise!')
               CYCLE
             END IF
             Solution => VariableGet( Model % Mesh % Variables, TRIM(FieldName)//' 2')
@@ -1219,7 +1399,7 @@ CONTAINS
             END IF
             Solution => VariableGet( Model % Mesh % Variables, TRIM(FieldName)//' 1')
           END IF
-
+          
           !---------------------------------------------------------------------
           ! There may be special complementary variables such as 
           ! displacement & mesh update. These are not implemented for modal output. 
@@ -1248,7 +1428,6 @@ CONTAINS
           ELSE
             sdofs = 1
           END IF
-
 
           !---------------------------------------------------------------------
           ! Finally save the field values 
@@ -1439,18 +1618,18 @@ CONTAINS
             ELSE 
               IF( L ) THEN
                 WRITE(Txt, '(A,A)') 'Nonexistent elemental variable: ',TRIM(FieldName)
-                CALL Warn('WriteVtuXMLFile', Txt)
+                CALL Warn('VtuOutputSolver', Txt)
               END IF
               CYCLE
             END IF
           END IF
-
+          
           VarType = Solution % Type
           Found = ( VarType == Variable_on_nodes_on_elements .OR. &
-              VarType == Variable_on_gauss_points .OR. &
+              VarType == Variable_on_gauss_points  .OR. &
               VarType == Variable_on_elements )
           IF (.NOT. Found ) CYCLE
-
+          
           Perm => Solution % Perm
           Dofs = Solution % DOFs
           Values => Solution % Values
@@ -1476,7 +1655,7 @@ CONTAINS
           ELSE
             sdofs = 1
           END IF
-
+          
           !---------------------------------------------------------------------
           ! Finally save the field values 
           !---------------------------------------------------------------------
@@ -1497,7 +1676,7 @@ CONTAINS
             END IF
             NoFieldsWritten = NoFieldsWritten + 1
           END IF
-
+          
           IF( BinaryOutput ) THEN
             k = PrecSize * sdofs * NumberOfElements
             Offset = Offset + IntSize + k
@@ -1564,13 +1743,22 @@ CONTAINS
               ELSE IF( VarType == Variable_on_gauss_points ) THEN
 
                 m = CurrentElement % ElementIndex
-                n = Perm(m+1)-Perm(m)
-                IF( n > 0 ) THEN
+                IF( m < SIZE( Perm ) ) THEN
+                  n = Perm(m+1)-Perm(m)
+                ELSE
+                  n = 0
+                END IF
+
+                IF( n == 0 ) THEN
+                  ElemVectVal(k) = 0.0_dp
+                ELSE
                   DO j=1,n
                     ElemInd(j) = Perm(m)+j
                   END DO
                   
                   IF( sdofs == 1 ) THEN
+                    ! Temporal test for visualizing the number of IP points!
+                    !ElemVectVal(1) = 1.0_dp * n
                     ElemVectVal(1) = SUM(Values(ElemInd(1:n))) / n
                   ELSE
                     DO k=1,sdofs
@@ -1592,8 +1780,15 @@ CONTAINS
                 
                 m = CurrentElement % ElementIndex
                 
-                IF( ASSOCIATED( Perm ) ) m = Perm( m ) 
-                
+                IF( ASSOCIATED( Perm ) ) THEN                  
+                  IF( m > SIZE( Perm ) ) THEN
+                    IF( ASSOCIATED( CurrentElement % BoundaryInfo ) ) THEN
+                      m = CurrentElement % BoundaryInfo % Left % ElementIndex
+                    END IF
+                  END IF
+                  m = Perm( m ) 
+                END IF
+                                  
                 IF( sdofs == 1 ) THEN
                   ElemVectVal(1) = Values(m) 
                 ELSE
@@ -1962,8 +2157,11 @@ CONTAINS
     CLOSE( VtuUnit )
 
     CALL AscBinWriteFree()
-    DEALLOCATE(ElemInd)
 
+    IF( ALLOCATED( ElemInd ) ) DEALLOCATE(ElemInd)
+    
+    CALL Info('WriteVtuFile','Finished writing file',Level=15)
+    
   END SUBROUTINE WriteVtuFile
 
 
@@ -2144,7 +2342,9 @@ CONTAINS
         END IF
         
         VarType = Solution % Type
-        IF( VarType == Variable_on_nodes_on_elements ) THEN
+        IF( VarType == Variable_on_nodes_on_elements .OR. &
+            VarType == Variable_on_elements .OR. &
+            VarType == Variable_on_gauss_points ) THEN
           IF( .NOT. ( ( DG .OR. DN ) .AND. SaveElemental ) ) CYCLE
         END IF
 
@@ -2213,7 +2413,10 @@ CONTAINS
 
       END DO
     END DO
-    WRITE( VtuUnit,'(A)') '    </PPointData>'
+    
+    IF( ScalarsExist .OR. VectorsExist) THEN
+      WRITE( VtuUnit,'(A)') '    </PPointData>'
+    END IF
   END IF
 
 
@@ -2255,7 +2458,9 @@ CONTAINS
           END IF
           
           VarType = Solution % Type
-          IF( VarType /= Variable_on_nodes_on_elements ) CYCLE
+          IF( VarType /= Variable_on_nodes_on_elements .AND. &
+              VarType /= Variable_on_elements .AND. &
+              VarType /= Variable_on_gauss_points ) CYCLE
 
           IF( ASSOCIATED(Solution % EigenVectors)) THEN
             NoModes = SIZE( Solution % EigenValues )
