@@ -103,8 +103,12 @@ MODULE StressLocal
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
 
      LOGICAL :: stat, CSymmetry, NeedMass, NeedHeat, NeedStress, NeedHarmonic, &
-         NeedPreStress, ActiveGeometricStiffness
+         NeedPreStress, ActiveGeometricStiffness, GPA
 
+
+     TYPE(ValueList_t), POINTER :: BF
+   
+     REAL(KIND=dp) :: GPA_Coeff(n)
 
      TYPE(Mesh_t), POINTER :: Mesh
      INTEGER :: ndim
@@ -143,12 +147,22 @@ MODULE StressLocal
      DAMP  = 0.0d0
 
      NeedMass = ANY( NodalDensity(1:n) /= 0.0d0 )
-     NeedMass = NeedMass .OR. ANY( NodalDamping(1:n) /= 0.0d0 )
+     NeedMass = NeedMass .OR. ANY( NodalDamping(1:n) /= 0.0d0 ) .OR. RayleighDamping
 
      NeedHeat = ANY( NodalTemperature(1:n) /= 0.0d0 )
      NeedHarmonic = ANY( LOAD_im(:,1:n) /= 0.0d0 ) 
      NeedPreStress = ANY( NodalPreStrain(1:6,1:n) /= 0.0d0 ) 
      NeedPreStress = NeedPreStress .OR. ANY( NodalPreStress(1:6,1:n) /= 0.0d0 ) 
+
+
+     BF => GetBodyForce()
+     GPA = .FALSE.
+     IF(ASSOCIATED(BF)) THEN
+        GPA = GetLogical(BF, 'Gravitational Prestress Advection', Found )
+       IF ( GPA ) THEN
+         GPA_Coeff(1:n) = GetReal( BF, 'GPA Coeff', Found )
+       END IF
+     END IF
 
 
      !      ! Integration stuff:
@@ -492,6 +506,12 @@ MODULE StressLocal
 
                 A(i,ndim) = A(i,ndim) - Basis(q) * dBasisdx(p,i)
                 A(ndim,i) = A(ndim,i) - dBasisdx(q,i) * Basis(p)
+             END DO
+           END IF
+ 
+           IF( GPA ) THEN
+             DO i=1,dim
+               A(i,dim) = A(i,dim) + SUM(GPA_Coeff(1:n)*Basis(1:n))*dBasisdx(q,i)*Basis(p)
              END DO
            END IF
 
@@ -1361,15 +1381,15 @@ CONTAINS
           S(2) = Strain(2,2)
           S(3) = Strain(3,3)
           S(4) = Strain(1,2)*2
-          i1(1:n) = (/ 1,2,3,1 /)
-          i2(1:n) = (/ 1,2,3,2 /)
+          i1(1:n) = [ 1,2,3,1 ]
+          i2(1:n) = [ 1,2,3,2 ]
         ELSE
           n = 3
           S(1) = Strain(1,1)
           S(2) = Strain(2,2)
           S(3) = Strain(1,2)*2
-          i1(1:n) = (/ 1,2,1 /)
-          i2(1:n) = (/ 1,2,2 /)
+          i1(1:n) = [ 1,2,1 ]
+          i2(1:n) = [ 1,2,2 ]
         END IF
      CASE(3)
         n = 6
@@ -1379,8 +1399,8 @@ CONTAINS
         S(4) = Strain(1,2)*2
         S(5) = Strain(2,3)*2
         S(6) = Strain(1,3)*2
-        i1(1:n) = (/ 1,2,3,1,2,1 /)
-        i2(1:n) = (/ 1,2,3,2,3,3 /)
+        i1(1:n) = [ 1,2,3,1,2,1 ]
+        i2(1:n) = [ 1,2,3,2,3,3 ]
      END SELECT
 
      DO i=1,n
@@ -1414,17 +1434,17 @@ CONTAINS
      CASE(2)
         IF ( CSymmetry ) THEN
           n = 4
-          i1(1:n) = (/ 1,2,3,1 /)
-          i2(1:n) = (/ 1,2,3,2 /)
+          i1(1:n) = [ 1,2,3,1 ]
+          i2(1:n) = [ 1,2,3,2 ]
         ELSE
           n = 3
-          i1(1:n) = (/ 1,2,1 /)
-          i2(1:n) = (/ 1,2,2 /)
+          i1(1:n) = [ 1,2,1 ]
+          i2(1:n) = [ 1,2,2 ]
         END IF
      CASE(3)
         n = 6
-        i1(1:n) = (/ 1,2,3,1,2,1 /)
-        i2(1:n) = (/ 1,2,3,2,3,3 /)
+        i1(1:n) = [ 1,2,3,1,2,1 ]
+        i2(1:n) = [ 1,2,3,2,3,3 ]
      END SELECT
 
 
@@ -1503,7 +1523,7 @@ CONTAINS
 
     REAL(KIND=dp) :: T(:,:), C(:), CT(3,3)
     INTEGER :: i,j,p,q,r,s
-    INTEGER :: I1(6) = (/ 1,2,3,1,2,1 /), I2(6) = (/ 1,2,3,2,3,3 /)
+    INTEGER :: I1(6) = [ 1,2,3,1,2,1 ], I2(6) = [ 1,2,3,2,3,3 ]
 
     !
     ! Convert stress vector to stress tensor:
@@ -1541,7 +1561,7 @@ CONTAINS
 
     REAL(KIND=dp) :: T(:,:), C(:), CT(3,3)
     INTEGER :: i,j,p,q,r,s
-    INTEGER :: I1(6) = (/ 1,2,3,1,2,1 /), I2(6) = (/ 1,2,3,2,3,3 /)
+    INTEGER :: I1(6) = [ 1,2,3,1,2,1 ], I2(6) = [ 1,2,3,2,3,3 ]
 
     !
     ! Convert strain vector to strain tensor:
@@ -1598,7 +1618,7 @@ CONTAINS
 
     REAL(KIND=dp) :: T(:,:), C(:,:), CT(2,2,2,2)
     INTEGER :: i,j,p,q,r,s
-    INTEGER :: I1(3) = (/ 1,2,1 /), I2(3) = (/ 1,2,2 /)
+    INTEGER :: I1(3) = [ 1,2,1 ], I2(3) = [ 1,2,2 ]
 
     !
     ! Convert C-matrix to 4 index elasticity tensor:
@@ -1646,7 +1666,7 @@ CONTAINS
 
     REAL(KIND=dp) :: T(:,:), C(:,:), CT(3,3,3,3)
     INTEGER :: i,j,p,q,r,s
-    INTEGER :: I1(6) = (/ 1,2,3,1,2,1 /), I2(6) = (/ 1,2,3,2,3,3 /)
+    INTEGER :: I1(6) = [ 1,2,3,1,2,1 ], I2(6) = [ 1,2,3,2,3,3 ]
 
     !
     ! Convert C-matrix to 4 index elasticity tensor:

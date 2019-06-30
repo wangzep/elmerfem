@@ -27,7 +27,7 @@
 ! *
 ! ******************************************************************************
 ! *
-! *  Authors: Juha Ruokolainen, Mikko Lyly, Peter R�back
+! *  Authors: Juha Ruokolainen, Mikko Lyly, Peter Råback
 ! *  Email:   Juha.Ruokolainen@csc.fi
 ! *  Web:     http://www.csc.fi/elmer
 ! *  Address: CSC - IT Center for Science Ltd.
@@ -1020,8 +1020,8 @@ CONTAINS
          Damping(1:n) = GetReal( Material, 'Damping', Found )
          RayleighDamping = GetLogical( Material, 'Rayleigh damping', Found )
          IF( RayleighDamping ) THEN
-           RayleighAlpha(1:N) = GetReal( Material, 'Rayleigh alpha', Found )
-           RayleighBeta(1:N) = GetReal( Material, 'Rayleigh beta', Found )
+           RayleighAlpha(1:N) = GetReal( Material, 'Rayleigh Damping alpha', Found )
+           RayleighBeta(1:N) = GetReal( Material, 'Rayleigh Damping beta', Found )
          ELSE
            RayleighAlpha = 0.0d0
            RayleighBeta = 0.0d0        
@@ -2066,11 +2066,11 @@ CONTAINS
 
          END DO
        END DO
-         
+
        IF(.NOT. FoundBoundary) THEN
-        CALL Fatal('StressSolve','Model lumping boudary must be defined')        
+        CALL Fatal('StressSolve','Model lumping boundary must be defined')
        END IF
-   
+
        IF(power == 1) Center(1:DIM) = Center(1:DIM) / Area
      END DO
 

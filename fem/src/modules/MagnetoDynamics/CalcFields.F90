@@ -558,6 +558,7 @@ END SUBROUTINE MagnetoDynamicsCalcFields_Init
    REAL(KIND=dp) :: xcoord, grads_coeff, val
    TYPE(ValueListEntry_t), POINTER :: HBLst
    REAL(KIND=dp) :: HarmPowerCoeff = 0.5_dp
+   INTEGER :: IOUnit
    
    INTEGER, POINTER, SAVE :: SetPerm(:) => NULL()
 !-------------------------------------------------------------------------------------------
@@ -665,10 +666,8 @@ END SUBROUTINE MagnetoDynamicsCalcFields_Init
      EL_FWP => VariableGet( Mesh % Variables, 'Winding Voltage E' )
    END IF
 
-   !IF( RealField ) THEN
-     NF => VariableGet( Mesh % Variables, 'Nodal Force') 
-     EL_NF => VariableGet( Mesh % Variables, 'Nodal Force E')
-   !END IF
+   NF => VariableGet( Mesh % Variables, 'Nodal Force') 
+   EL_NF => VariableGet( Mesh % Variables, 'Nodal Force E')
 
    CD => VariableGet( Mesh % Variables, 'Current Density' )
    EL_CD => VariableGet( Mesh % Variables, 'Current Density E' )
@@ -1837,15 +1836,15 @@ END SUBROUTINE MagnetoDynamicsCalcFields_Init
      IF( ParEnv % MyPe == 0 ) THEN
        LossFile = ListGetString(SolverParams,'Harmonic Loss Filename',Found )
        IF( Found ) THEN
-         OPEN (10, FILE=LossFile)
-         WRITE( 10,'(A)')  '!body_id   harmonic(1)      harmonic(2)      joule'
+         OPEN(NEWUNIT=IOUnit, FILE=LossFile)
+         WRITE(IOUnit,'(A)')  '!body_id   harmonic(1)      harmonic(2)      joule'
          DO j=1,Model % NumberOfBodies
            IF( SUM(BodyLoss(1:3,j)) < TINY( TotalLoss(1) ) ) CYCLE
-           WRITE( 10,'(I0,T10,3ES17.9)') j, BodyLoss(1:3,j)
+           WRITE(IOUnit,'(I0,T10,3ES17.9)') j, BodyLoss(1:3,j)
          END DO
          CALL Info('MagnetoDynamicsCalsFields', &
              'Harmonic loss for bodies was saved to file: '//TRIM(LossFile),Level=6 )
-         CLOSE(10)
+         CLOSE(IOUnit)
        END IF
      END IF
 
@@ -2488,16 +2487,11 @@ CONTAINS
 !------------------------------------------------------------------------------
    IF(.NOT. ASSOCIATED(var)) RETURN
 
-   IF( ANY( Var % Perm( Element % DGIndexes(1:n) ) <= 0 ) ) THEN
-     PRINT *,'size',SIZE( Var % Perm ), MAXVAL( Element % DGIndexes(1:n))
-     PRINT *,'Perm zero:',m,n,dofs,Var % Perm( Element % DGIndexes(1:n) )
-     PRINT *,'size values',SIZE(Var % Values)
-     PRINT *,'Element index:',Element % ElementIndex
-     PRINT *,'Element indexes:',Element % NodeIndexes
-     STOP
-   END IF
+   ind(1:n) = Var % Perm(Element % DGIndexes(1:n))
 
-   ind(1:n) = Var % DOFs*(Var % Perm(Element % DGIndexes(1:n))-1)
+   IF( ANY( ind(1:n) <= 0 ) ) RETURN
+
+   ind(1:n) = Var % DOFs * (ind(1:n)-1)
  
    DO i=1,m
       dofs = dofs+1
@@ -2525,11 +2519,16 @@ CONTAINS
    LOGICAL :: Additive
 !------------------------------------------------------------------------------
    IF(.NOT. ASSOCIATED(var)) RETURN
+
    IF(PRESENT(UElement)) THEN
-     ind(1:n) = Var % DOFs*(Var % Perm(UElement % DGIndexes(1:n))-1)
+     ind(1:n) = Var % Perm(UElement % DGIndexes(1:n))
    ELSE
-     ind(1:n) = Var % DOFs*(Var % Perm(Element % DGIndexes(1:n))-1)
+     ind(1:n) = Var % Perm(Element % DGIndexes(1:n))
    END IF
+
+   IF( ANY(ind(1:n) == 0 ) ) RETURN
+   
+   ind(1:n) = Var % Dofs * ( ind(1:n) - 1)
    
    IF(PRESENT(uAdditive)) THEN
      Additive = uAdditive

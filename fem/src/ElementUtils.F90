@@ -1298,7 +1298,6 @@ CONTAINS
         DO l=1,DOFs
           j = Reorder( InvInitialReorder(i) )
           k1 = DOFs * (j-1) + l
-          
           Rows(k1+1) = Dofs * List(i) % Degree
         END DO
       END DO
@@ -1329,6 +1328,17 @@ CONTAINS
       END DO
       !$OMP END PARALLEL DO      
     ELSE
+      Rows(1) = 1
+      DO i=1,n       
+        DO l=1,DOFs
+          k1 = DOFs * (i-1) + l
+          Rows(k1+1) = Dofs * List(i) % Degree
+        END DO
+      END DO
+      DO i=1,Dofs*n
+        Rows(i+1) = Rows(i) + Rows(i+1)
+      END DO
+
       ! If there is no renumbering then the reordering is one-to-one mapping
       !$OMP PARALLEL DO SHARED(Rows, Cols, List, n, DOFs) &
       !$OMP PRIVATE(CList, l, j, k1, k2, k, m) &
@@ -1350,8 +1360,6 @@ CONTAINS
             END DO
             CList => Clist % Next
           END DO
-          
-          Rows(k1+1) = k2+1
         END DO
       END DO
       !$OMP END PARALLEL DO      
@@ -1393,7 +1401,7 @@ CONTAINS
      INTEGER i,j,k,l,k1,t,n, p,m, minEdgeDOFs, maxEdgeDOFs, &
            minFaceDOFs, maxFaceDOFs, BDOFs, cols, istat
      INTEGER, POINTER :: Ivals(:)
-     INTEGER, ALLOCATABLE :: InvInitialReorder(:)
+     INTEGER, ALLOCATABLE, SAVE :: InvInitialReorder(:)
      INTEGER :: nthr
      LOGICAL :: UseThreads
      LOGICAL, ALLOCATABLE :: ConstrainedNode(:)
@@ -1411,6 +1419,10 @@ CONTAINS
      IF( OptimizeBW ) THEN
        IF( ListGetLogical( Solver % Values,'DG Reduced Basis',Found ) ) THEN
          CALL Info('CreateMatrix','Suppressing bandwidth optimization for discontinuous bodies',Level=8)
+         OptimizeBW = .FALSE.
+       END IF
+       IF( ListGetLogical( Solver % Values,'Apply Conforming BCs',Found ) ) THEN
+         CALL Info('CreateMatrix','Suppressing bandwidth optimization for conforming bcs',Level=8)
          OptimizeBW = .FALSE.
        END IF
      END IF
@@ -1481,6 +1493,7 @@ CONTAINS
        CALL Info('CreateMatrix','creating initial permutation',Level=14)
        k = InitialPermutation( Perm,Model,Solver,Mesh,Eq,DG,GB )
        IF ( k <= 0 ) THEN
+         IF(ALLOCATED(InvInitialReorder)) DEALLOCATE(InvInitialReorder)
          RETURN
        END IF
      ELSE
@@ -1537,7 +1550,10 @@ CONTAINS
 
      ! check if matrix structures really need to be created:
      ! -----------------------------------------------------
-     IF ( ListGetLogical( Solver % Values, 'No matrix',GotIt)) RETURN
+     IF ( ListGetLogical( Solver % Values, 'No matrix',GotIt)) THEN
+       IF(ALLOCATED(InvInitialReorder)) DEALLOCATE(InvInitialReorder)
+       RETURN
+     END IF
 
      !------------------------------------------------------------------------------
      ! Note that Model % RowNonZeros is not used anymore!!!!
@@ -1737,7 +1753,7 @@ CONTAINS
      END IF
 
 !     DEALLOCATE( Model % RowNonZeros )
-     IF( OptimizeBW ) DEALLOCATE( InvInitialReorder )
+     IF( ALLOCATED(InvInitialReorder) ) DEALLOCATE( InvInitialReorder )
 !------------------------------------------------------------------------------
    END FUNCTION CreateMatrix
 !------------------------------------------------------------------------------

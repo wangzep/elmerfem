@@ -89,13 +89,13 @@ MODULE Types
                         SOLVER_EXEC_PREDCORR = 7
 
   INTEGER, PARAMETER :: SOLVER_MODE_DEFAULT = 0, &    ! normal pde
-	                SOLVER_MODE_AUXILIARY = 1, &  ! no fem machinery (SaveData)
-	                SOLVER_MODE_ASSEMBLY = 2, &   ! coupled solver with single block
-	                SOLVER_MODE_COUPLED = 3, &    ! coupled solver with multiple blocks
-	                SOLVER_MODE_BLOCK = 4, &      ! block solver
-	                SOLVER_MODE_GLOBAL = 5, &     ! lumped variables (no mesh)
-	                SOLVER_MODE_MATRIXFREE = 6, & ! normal field, no matrix
-                        SOLVER_MODE_STEPS = 7         ! as the legacy but splitted to different steps
+	                      SOLVER_MODE_AUXILIARY = 1, &  ! no fem machinery (SaveData)
+	                      SOLVER_MODE_ASSEMBLY = 2, &   ! coupled solver with single block
+	                      SOLVER_MODE_COUPLED = 3, &    ! coupled solver with multiple blocks
+	                      SOLVER_MODE_BLOCK = 4, &      ! block solver
+	                      SOLVER_MODE_GLOBAL = 5, &     ! lumped variables (no mesh)
+	                      SOLVER_MODE_MATRIXFREE = 6, & ! normal field, no matrix
+                        SOLVER_MODE_STEPS = 7         ! as the legacy but split to different steps
 
   INTEGER, PARAMETER :: PROJECTOR_TYPE_DEFAULT = 0, &  ! unspecified constraint matrix
                         PROJECTOR_TYPE_NODAL = 1, &    ! nodal projector
@@ -173,6 +173,7 @@ END INTERFACE
     LOGICAL, ALLOCATABLE :: SubMatrixActive(:,:)
     TYPE(SubVector_t), POINTER :: SubVector(:) => NULL()
     INTEGER, POINTER :: BlockStruct(:)
+    INTEGER, POINTER :: InvBlockStruct(:)
     LOGICAL :: GotBlockStruct
     LOGICAL, ALLOCATABLE :: SubMatrixTranspose(:,:)
   END TYPE BlockMatrix_t
@@ -481,7 +482,9 @@ END INTERFACE
      TYPE(VariableTable_t) :: VarTable(32)
      INTEGER :: VarCount
 
-     TYPE(ValueHandle_t), POINTER :: HandleIm
+     TYPE(ValueHandle_t), POINTER :: HandleIm => NULL()
+     TYPE(ValueHandle_t), POINTER :: Handle2 => NULL()
+     TYPE(ValueHandle_t), POINTER :: Handle3 => NULL()
    END TYPE ValueHandle_t
 
 
@@ -597,6 +600,7 @@ END INTERFACE
 
      INTEGER :: DOFs = 0
      INTEGER, POINTER          :: Perm(:) => NULL()
+     LOGICAL :: PeriodicFlipActive = .FALSE.
      REAL(KIND=dp)             :: Norm=0, PrevNorm=0,NonlinChange=0, SteadyChange=0
      INTEGER :: NonlinConverged=-1, SteadyConverged=-1, NonlinIter=-1
      INTEGER :: LinConverged=-1
@@ -790,6 +794,9 @@ END INTERFACE
      LOGICAL :: DisContMesh 
      INTEGER, POINTER :: DisContPerm(:)
      INTEGER :: DisContNodes
+
+     INTEGER, POINTER :: PeriodicPerm(:) => NULL()
+     LOGICAL, POINTER :: PeriodicFlip(:) => NULL()
      
      INTEGER, POINTER :: InvPerm(:)
 
@@ -847,6 +854,7 @@ END INTERFACE
       REAL(KIND=dp) :: Alpha,Beta,dt
 
       LOGICAL :: NewtonActive = .FALSE.
+      LOGICAL :: PeriodicFlipActive = .FALSE.
       
       INTEGER :: SolverExecWhen
       INTEGER :: SolverMode
@@ -867,8 +875,7 @@ END INTERFACE
       TYPE(Matrix_t), POINTER :: ConstraintMatrix => NULL()
       TYPE(MortarBC_t), POINTER :: MortarBCs(:) => NULL()
       LOGICAL :: MortarBCsChanged = .FALSE., ConstraintMatrixVisited = .FALSE.
-      INTEGER(KIND=AddrInt) :: MortarProc, &
-          BoundaryElementProcedure=0, BulkElementProcedure=0
+      INTEGER(KIND=AddrInt) :: BoundaryElementProcedure=0, BulkElementProcedure=0
 
       TYPE(Graph_t), POINTER :: ColourIndexList => NULL(), BoundaryColourIndexList => NULL()
       INTEGER :: CurrentColour = 0, CurrentBoundaryColour = 0
@@ -919,7 +926,7 @@ END INTERFACE
     TYPE Model_t
 !------------------------------------------------------------------------------
 !
-!     Coodrinate system dimension + type
+!     Coordinate system dimension + type
 !
       INTEGER :: DIMENSION, CoordinateSystem
 !

@@ -24,7 +24,7 @@
 !------------------------------------------------------------------------------
 !> Subroutine for saving the results in XML based VTK format (VTU). Both ascii and binary
 !> output is available, in single or double precision. The format is understood by 
-!> visualization softwares Paraview and ViSit, for example.
+!> visualization software Paraview and ViSit, for example.
 !> \ingroup Solvers
 !------------------------------------------------------------------------------
 SUBROUTINE VtuOutputSolver( Model,Solver,dt,TransientSimulation )
@@ -381,8 +381,8 @@ SUBROUTINE VtuOutputSolver( Model,Solver,dt,TransientSimulation )
   NumberOfDofNodes = 0
 
   IF( DG .OR. DN ) THEN    
-    IF(.NOT. CheckAnyElementalField() ) THEN
-      CALL Info('VtuOutputSolver','No elemental fields, omitting discontinuity creation!',Level=6)
+    IF(.NOT. CheckAnyDGField() ) THEN
+      CALL Info('VtuOutputSolver','No DG or IP fields, omitting discontinuity creation!',Level=6)
       DG = .FALSE. 
       DN = .FALSE.
     END IF
@@ -879,18 +879,18 @@ CONTAINS
 
 
 
-  ! Check whether there is any elemental field to be saved. 
+  ! Check whether there is any discontinuous galerkin field to be saved. 
   ! It does not make sense to use discontinuous saving if there are no discontinuous fields.
   ! It will even result to errors since probably there are no DG indexes either. 
-  FUNCTION CheckAnyElementalField() RESULT ( HaveAnyElemental ) 
+  FUNCTION CheckAnyDGField() RESULT ( HaveAnyDG ) 
 
-    LOGICAL :: HaveAnyElemental
+    LOGICAL :: HaveAnyDG
     INTEGER :: Rank, Vari, VarType
     CHARACTER(LEN=1024) :: Txt, FieldName
     TYPE(Variable_t), POINTER :: Solution
     LOGICAL :: Found
     
-    HaveAnyElemental = .FALSE.
+    HaveAnyDG = .FALSE.
 
     DO Rank = 0,1
       DO Vari = 1, 999
@@ -909,15 +909,14 @@ CONTAINS
         VarType = Solution % Type
         
         IF ( VarType == Variable_on_nodes_on_elements .OR. &
-            VarType == Variable_on_elements .OR. &
             VarType == Variable_on_gauss_points ) THEN
-          HaveAnyElemental = .TRUE.
+          HaveAnyDG = .TRUE.
           EXIT
         END IF
       END DO
     END DO
 
-  END FUNCTION CheckAnyElementalField
+  END FUNCTION CheckAnyDGField
 
 
 
@@ -1146,7 +1145,7 @@ CONTAINS
         FieldName, FieldName2, OutStr
     CHARACTER :: lf
     LOGICAL :: ScalarsExist, VectorsExist, Found,&
-        ComponentVector, ComplementExists, Use2, IsHarmonic
+        ComponentVector, ComplementExists, Use2, IsHarmonic, FlipActive
     LOGICAL :: WriteData, WriteXML, L, Buffered
     TYPE(Variable_t), POINTER :: Solution
     INTEGER, POINTER :: Perm(:), Perm2(:), DispPerm(:), Disp2Perm(:)
@@ -1176,7 +1175,8 @@ CONTAINS
     WriteData = AsciiOutput
     Params => GetSolverParams()
     Buffered = .TRUE.
-
+    FlipActive = .FALSE.
+    
     ! we could have huge amount of gauss points
     ALLOCATE( ElemInd(512)) !Model % Mesh % MaxElementDOFS))
 
@@ -1374,7 +1374,8 @@ CONTAINS
           dofs = Solution % DOFs
           Values => Solution % Values
           VarType = Solution % Type
-                    
+          FlipActive = Solution % PeriodicFlipActive 
+          
           !---------------------------------------------------------------------
           ! Some vectors are defined by a set of components (either 2 or 3)
           !---------------------------------------------------------------------
@@ -1544,6 +1545,10 @@ CONTAINS
                     val = Values(dofs*(j-1)+k)              
                   END IF
 
+                  IF( FlipActive ) THEN
+                    IF( Model % Mesh % PeriodicFlip(i) ) val = -val
+                  END IF
+                  
                   CALL AscBinRealWrite( val )
                 END DO
               END DO
@@ -1574,7 +1579,7 @@ CONTAINS
       CALL AscBinStrWrite( OutStr ) 
     END IF
 
-    IF( SaveElemental .AND. .NOT. ( DG .OR. DN ) ) THEN
+    IF( SaveElemental ) THEN
       CALL Info('VtuOutputSolver','Writing elemental fields',Level=10)
       NoFieldsWritten = 0
       DO Rank = 0,1
@@ -1605,7 +1610,7 @@ CONTAINS
           Solution => VariableGet( Model % Mesh % Variables, TRIM(FieldName))
           ComponentVector = .FALSE.
 
-          ! If we are looking for a vector just one dofs wont do!
+          ! If we are looking for a vector just one dofs won't do!
           ! This circumvents a problem somewhere else in the code. 
           IF( ASSOCIATED( Solution ) ) THEN
             IF( Rank > 0 .AND. Solution % Dofs <= 1 ) NULLIFY( Solution ) 
@@ -1624,15 +1629,24 @@ CONTAINS
             END IF
           END IF
           
-          VarType = Solution % Type
-          Found = ( VarType == Variable_on_nodes_on_elements .OR. &
-              VarType == Variable_on_gauss_points  .OR. &
-              VarType == Variable_on_elements )
+          VarType = Solution % TYPE
+
+          IF( DG .OR. DN ) THEN
+            Found = ( VarType == Variable_on_elements )
+          ELSE
+            Found = ( VarType == Variable_on_nodes_on_elements .OR. &
+                VarType == Variable_on_gauss_points  .OR. &
+                VarType == Variable_on_elements )            
+          END IF
           IF (.NOT. Found ) CYCLE
           
           Perm => Solution % Perm
           Dofs = Solution % DOFs
           Values => Solution % Values
+
+          IF( Solution % PeriodicFlipActive ) THEN
+            CALL Warn('VtuOutputSolver','Cannot yet deal with PeriodicFlip in elemental variables!')
+          END IF
           
           !---------------------------------------------------------------------
           ! Some vectors are defined by a set of components (either 2 or 3)
@@ -1806,7 +1820,7 @@ CONTAINS
                 END IF
                 
               END IF
-                
+                            
               DO k=1,sdofs
                 CALL AscBinRealWrite( ElemVectVal(k) )
               END DO
@@ -1862,8 +1876,12 @@ CONTAINS
             j = CurrentElement % BodyId 
             j = GeometryBodyMap( j )
           ELSE
-            j = GetBCId( CurrentElement ) 
-            IF ( j>=1 .AND. j<= SIZE(GeometryBCMap)) j = GeometryBCMap( j )
+            j = GetBCId( CurrentElement )
+            IF ( j>=1 .AND. j<= SIZE(GeometryBCMap)) THEN
+              j = GeometryBCMap( j )
+            ELSE
+              j = BCOffset
+            END IF
           END IF
 
           CALL AscBinIntegerWrite( j )
@@ -2006,7 +2024,6 @@ CONTAINS
 
         CurrentElement => Model % Elements(i)
 
-        !          NodeIndexes => Elmer2VtkIndexes( CurrentElement, DG .OR. DN, SaveLinear )
         CALL Elmer2VtkIndexes( CurrentElement, DG .OR. DN, SaveLinear, TmpIndexes )
 
         IF( SaveLinear ) THEN
@@ -2018,8 +2035,6 @@ CONTAINS
         DO j=1,n
           IF( DN .OR. DG ) THEN
             jj = DgPerm( TmpIndexes(j) )
-!          ELSE IF( DG ) THEN
-!            jj = TmpIndexes(j)
           ELSE IF( NoPermutation ) THEN
             jj = TmpIndexes(j)
           ELSE
@@ -2341,11 +2356,18 @@ CONTAINS
           END IF
         END IF
         
-        VarType = Solution % Type
-        IF( VarType == Variable_on_nodes_on_elements .OR. &
-            VarType == Variable_on_elements .OR. &
-            VarType == Variable_on_gauss_points ) THEN
+        VarType = Solution % TYPE
+
+        IF ( VarType == Variable_on_nodes_on_elements ) THEN
           IF( .NOT. ( ( DG .OR. DN ) .AND. SaveElemental ) ) CYCLE
+        ELSE IF( VarType == Variable_on_elements ) THEN
+          CYCLE
+        ELSE IF( VarType == Variable_on_gauss_points ) THEN
+          IF ( DG ) THEN
+            CONTINUE
+          ELSE
+            CYCLE
+          END IF
         END IF
 
         IF( ASSOCIATED(Solution % EigenVectors)) THEN
@@ -2398,7 +2420,10 @@ CONTAINS
             ELSE
               IndField = iField
             END IF
-            WRITE( FullName,'(A,I0)') TRIM( FieldName )//' mode',IndField
+            WRITE( FullName,'(A,I0)') TRIM( FieldName )//' EigenMode',IndField
+
+            ! Note: this should be added for "HarmonicMode" and "ConstraintMode" too
+            ! now the .vptu file for these vectors is not correct!
           END IF
 
           IF( AsciiOutput ) THEN
@@ -2420,11 +2445,11 @@ CONTAINS
   END IF
 
 
-    ! Elementwise information
-    !-------------------------------------
-    WRITE( VtuUnit,'(A)') '    <PCellData>'
+  ! Elementwise information
+  !-------------------------------------
+  WRITE( VtuUnit,'(A)') '    <PCellData>'
 
-  IF( SaveElemental  .AND. .NOT. ( DG .OR. DN ) ) THEN
+  IF( SaveElemental ) THEN
     IF( ScalarsExist .OR. VectorsExist ) THEN
       DO Rank = 0,2
         DO Vari = 1, 999
@@ -2458,9 +2483,15 @@ CONTAINS
           END IF
           
           VarType = Solution % Type
-          IF( VarType /= Variable_on_nodes_on_elements .AND. &
-              VarType /= Variable_on_elements .AND. &
-              VarType /= Variable_on_gauss_points ) CYCLE
+          
+          IF( DG .OR. DN ) THEN
+            Found = ( VarType == Variable_on_elements )
+          ELSE
+            Found = ( VarType == Variable_on_nodes_on_elements .OR. &
+                VarType == Variable_on_gauss_points  .OR. &
+                VarType == Variable_on_elements )            
+          END IF
+          IF (.NOT. Found ) CYCLE
 
           IF( ASSOCIATED(Solution % EigenVectors)) THEN
             NoModes = SIZE( Solution % EigenValues )
