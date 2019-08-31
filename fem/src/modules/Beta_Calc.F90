@@ -95,11 +95,11 @@ FUNCTION BetaCalc(Model, n, x) RESULT(initopt)
 	!discontinity at the border.
 	!The factor of 3.14/2 is to account for the difference in area under the curve of a cos and a Heaviside
 	!function.
-    !initopt = 3.14/2*Beta*power/(area*h*laser_frequency)*COS((3.14**(3/2)*SQRT(x(1)**2 + x(2)**2))/(SQRT(area)))
+    initopt = 3.14/2*Beta*power/(area*h*laser_frequency)*COS((3.14**(3/2)*SQRT(x(1)**2 + x(2)**2))/(SQRT(area)))
 
 
     !Regualr initopt expression (used for testing)
-    initopt = Beta*power/(area*h*laser_frequency)
+    !initopt = Beta*power/(area*h*laser_frequency)
     !PRINT *,'Power is', power
     !PRINT *,'Area is', area
     !PRINT *,'h is', h

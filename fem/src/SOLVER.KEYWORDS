@@ -1622,7 +1622,7 @@ Material:Real:       'Rate Factor 2'
 Material:Real:       'Activation Energy 1'
 Material:Real:       'Activation Energy 2'
 Material:String:     'Glen Enhancement Factor Function'
-<<<<<<< HEAD
+
 !!!For SEOP
 Constants:Real:      'rubidium wavelength'
 Constants:Real:      'rubidium frequency width'
@@ -1653,7 +1653,6 @@ BC:Real:             'xepol'
 BC:Real:             'decay rate coefficient'
 BC:Real:             'dgflux'
 
-=======
 Material:Real:       'Turbulent Prandtl Number'
 Material:Real:       'Shear Modulus'
 Material:Real:       'Tensile strength'
@@ -1675,4 +1674,3 @@ solver:logical:      'restart error continue'
 solver:real:         'linear system namespace number'
 solver:logical:      'linear system trialing'
 solver:logical:      'linear system trialing conserve'
->>>>>>> ed16b68fcb1a761fbe0e28739c5c95c9a34e84aa
