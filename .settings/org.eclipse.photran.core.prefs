@@ -1,0 +1,7 @@
+EnableContentAssist=true
+EnableDeclView=true
+EnableHoverTip=true
+EnableVPG=true
+FortranIncludePaths=/Elmer-Debug@elmerfem\n
+FortranModulePaths=/Elmer-Debug@elmerfem\n
+eclipse.preferences.version=1
