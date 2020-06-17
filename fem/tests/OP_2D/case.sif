@@ -1,0 +1,54 @@
+Check Keywords "Warn"
+
+Header :: Mesh DB "." "square"
+
+Constansts
+  alkali wavelength = Real 794.7e-9
+  alkali line width = Real $rbfreqwidth*10^9
+  laser wavelength = 795
+  laser line width = 0.3
+  oscillator strength = .33333333333333333
+  laser area = 1
+  laser power = 10
+  speed of light = 3e8
+End
+
+Simulation
+  Max Output Level = 5
+  Coordinate System = Cartesian
+  Simulation Type = Steady
+  Output Intervals(1) = 1
+  Steady State Max Iterations = 20
+!  Post File   = "case.vtu"
+End
+#print("this is lua")
+
+Body 1
+  Equation = 1
+  Material = 1
+  Body Force = 1
+End
+
+Material 1
+  alkali density = 1e15
+  temperature = 400
+End
+
+Solver 1
+  Equation = "OPSolver"
+  Variable = "optrate"
+  Procedure = "OPSolver" "OPSolver"
+  Element = "p:2"
+  Linear System Solver = Direct
+  Steady State Convergence Tolerance = 1e-9
+End
+
+Boundary Condition 1
+  Target Boundaries(1) = 1
+  laser direction = 1 0
+End
+
+
+Solver 1 :: Reference Norm = Real 1.0578593
+Solver 1 :: Reference Norm Tolerance = Real 1.0E-5
+RUN
