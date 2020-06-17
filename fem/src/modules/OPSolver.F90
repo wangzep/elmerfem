@@ -44,9 +44,8 @@
 SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
   USE DefUtils
-  !Need to write OPUtils that contains a function for calculating Beta
-!  USE OPUtils
-! *
+  USE OPUtil
+
 ! * Boiler-plate begining code for Elmer Solvers. See Elmer Solver manaul for details.
   IMPLICIT NONE
 !------------------------------------------------------------------------------
