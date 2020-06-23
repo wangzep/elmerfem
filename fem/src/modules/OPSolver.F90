@@ -68,8 +68,8 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
     CALL DefaultStart()
 
     maxiter = ListGetInteger( GetSolverParams(),&
-        'Nonlinear System Max Iterations',found,minv=1)
-    IF(.NOT. found ) maxiter = 1
+        'Nonlinear System Max Iterations',found,minv=2)
+    IF(.NOT. found ) maxiter = 2
 
     ! Nonlinear iteration loop:
     !--------------------------
@@ -205,6 +205,7 @@ CONTAINS
             !Put together the nonlinear term
             temp=spin_destruction_rate+previous_solution
             temp=previous_solution/temp
+            temp=1-temp
             !temp=alkali_line_width*temp
             temp=alkali_density*temp
 
