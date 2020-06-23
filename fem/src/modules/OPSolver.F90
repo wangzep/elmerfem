@@ -136,8 +136,8 @@ CONTAINS
         TYPE(Element_t), POINTER :: Element
         !------------------------------------------------------------------------------
         REAL(KIND=dp) ::  laser_direction(3,n),directionterm(3), Weight, nonlinearterm
-        REAL(KIND=dp) :: alkali_density(n), spin_destruction_rate(n), alkali_line_width, &
-            previous_solution(n), temp(n)
+        REAL(KIND=dp) :: alkali_density(n), spin_destruction_rate(n), alkali_line_width(n), &
+            beta(n),previous_solution(n), temp(n)
 
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ!,LoadAtIP
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd), LOAD(n)
@@ -146,7 +146,7 @@ CONTAINS
 
         INTEGER :: i,t,p,q,dim
         TYPE(GaussIntegrationPoints_t) :: IP
-        TYPE(ValueList_t), POINTER :: BodyForce, Material!, Constants
+        TYPE(ValueList_t), POINTER :: BodyForce, Material, Constants
         TYPE(Nodes_t) :: Nodes
         SAVE Nodes
         !------------------------------------------------------------------------------
@@ -167,13 +167,14 @@ CONTAINS
         CALL GetScalarLocalSolution(previous_solution, 'optrate', Element)
 
         !Pointers to the SIF Constants and Material information
-        !Constants => GetConstants()
+        Constants => GetConstants()
         Material => GetMaterial()
 
         !Let's get the relevent information
         alkali_density(1:n)=GetReal(Material,'alkali density',found)
         spin_destruction_rate(1:n)=GetReal(Material,'spin destrution rate',found)
-        !alkali_line_width(1:n)=GetReal(Material,'alkali line width',found)
+        alkali_line_width(1:n)=GetReal(Constants,'alkali line width',found)
+        beta(1:n)=GetReal(Material,'beta',found)
 
         laser_direction = 0._dp
         DO i=1,dim
@@ -194,20 +195,17 @@ CONTAINS
 
             ! The source term at the integration point:
             !------------------------------------------
-            !LoadAtIP = SUM( Basis(1:n) * LOAD(1:n) )
 
-            !rho = SUM(Basis(1:n)*time_coeff(1:n))
             directionterm = MATMUL(laser_direction(:,1:n),Basis(1:n))
-            !D = SUM(Basis(1:n)*diff_coeff(1:n))
-            !C = SUM(Basis(1:n)*conv_coeff(1:n))
-            !R = SUM(Basis(1:n)*react_coeff(1:n))
+
 
             !Put together the nonlinear term
             temp=spin_destruction_rate+previous_solution
             temp=previous_solution/temp
             temp=1-temp
-            !temp=alkali_line_width*temp
+            temp=alkali_line_width*temp
             temp=alkali_density*temp
+            temp=beta*temp
 
             nonlinearterm = SUM(Basis(1:n)*temp(1:n))
 
