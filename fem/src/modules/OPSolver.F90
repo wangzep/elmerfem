@@ -172,14 +172,22 @@ CONTAINS
 
         !Let's get the relevent information
         alkali_density(1:n)=GetReal(Material,'alkali density',found)
+        CALL FoundCheck(found, 'alkali density', 'fatal')
+
         spin_destruction_rate(1:n)=GetReal(Material,'spin destrution rate',found)
+        CALL FoundCheck(found, 'spin destruction', 'fatal')
+
         alkali_line_width(1:n)=GetReal(Constants,'alkali line width',found)
-        beta(1:n)=GetReal(Material,'beta',found)
+        CALL FoundCheck(found, 'alkali line width', 'fatal')
+
+        beta(1:n)=GetReal(Constants,'beta',found)
+        CALL FoundCheck(found, 'beta', 'fatal')
 
         laser_direction = 0._dp
         DO i=1,dim
             laser_direction(i,1:n)=GetReal(Material,&
                 'laser direction '//TRIM(I2S(i)),found)
+                CALL FoundCheck(found, 'laser direction', 'fatal')
         END DO
 
 
@@ -313,7 +321,32 @@ CONTAINS
         CALL DefaultUpdateEquations(STIFF,FORCE)
     !------------------------------------------------------------------------------
     END SUBROUTINE LocalMatrixBC
-!------------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
+
+    SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
+        USE DefUtils
+
+        IMPLICIT NONE
+
+        LOGICAL, INTENT(IN) :: found
+        CHARACTER(len=*), INTENT(IN) :: name
+        CHARACTER(len=5), INTENT(IN) :: warn_fatal_flag
+        CHARACTER(len=len(name)+28) :: outputstring
+
+        !Putting together the text to be printed with the warning or fatal warning.
+
+        outputstring=TRIM('The parameter '//name//' was not found')
+
+
+        IF (.NOT. found) THEN
+            IF (warn_fatal_flag .EQ. 'warn') THEN
+                CALL Warn('OPSolver', outputstring)
+            ELSE
+                CALL Fatal('OPSolver', outputstring)
+            END IF
+        END IF
+
+    END SUBROUTINE FoundCheck
 
 !------------------------------------------------------------------------------
 END SUBROUTINE OPSolver
