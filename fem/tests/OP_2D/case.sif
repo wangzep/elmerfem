@@ -8,8 +8,8 @@ Constants
 
   laser wavelength = Real 800.0D-9
   laser line width = Real 2.0D-9
-  !beta = Real 1
-  Compute Beta = LOGICAL True
+  beta = Real 1
+  Compute Beta = LOGICAL False
 End
 
 Simulation
@@ -28,14 +28,20 @@ Body 1
 End
 
 Material 1
+  Compute Alkali Density = LOGICAL True
+  
   !alkali density = Real 3
-  alkali density = Real 1e19
+  !alkali density = Real 1e19
 
-  !spin destruction rate = Real 3
-  spin destruction rate = Real 2.1D4
+  Compute Spin Destruction Rate = LOGICAL False
+  spin destruction rate = Real 3
+  !spin destruction rate = Real 2.1D4
 
   laser direction 1 = Real 1
-  laser direction 2 = Real 0  
+  laser direction 2 = Real 0 
+
+  Density = 1.3
+  Concentration Diffusivity = Real 1.0e-3 
 End
 
 Solver 1
@@ -49,21 +55,42 @@ Solver 1
   Nonlinear System Convergence Tolerance = 1e-9
 End
 
+Solver 2
+Equation = Advection Diffusion
+  Variable = Concentration
+  Variable DOFs = 1
+  Procedure = "AdvectionDiffusion" "AdvectionDiffusionSolver"
+  Linear System Solver = Iterative
+  Linear System Iterative Method = BiCGStab
+  Linear System Max Iterations = 200
+  Linear System Convergence Tolerance = 1.0e-08
+  Linear System Preconditioning = ILU1
+  Linear System ILUT Tolerance = 1.0e-03
+  Nonlinear System Max Iterations = 1
+  Nonlinear System Convergence Tolerance = 1.0e-4
+  Nonlinear System Newton After Tolerance = 1.0e-3
+  Nonlinear System Newton After Iterations = 10
+  Nonlinear System Relaxation Factor = 1
+  Steady State Convergence Tolerance = 1.0e-4
+! Stabilize = False  ! this is default
+  Bubbles = False
+End
+
 Equation 1
-  Compute Alkali Density = LOGICAL False
-  Compute Spin Destruction Rate = LOGICAL False	
-  Active Solvers(1) = 1
+  Active Solvers(2) = 1 2
 End
 
 Boundary Condition 1
   Target Boundaries(1) = 1
-  !optrate = Real 1
-  optrate = Real 2.4e5
+  optrate = Real 1
+  !optrate = Real 2.4e5
+  Concentration = Real 3
 End
 
 Initial Condition 1
-  !optrate = Real 1
-  optrate = Real 2.4e5
+  optrate = Real 1
+  !optrate = Real 2.4e5
+  Concentration = Real 3
 End
 
 !Solver 1 :: Reference Norm = Real 1.0578593

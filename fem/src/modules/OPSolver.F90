@@ -160,6 +160,8 @@ CONTAINS
 
         LOGICAL :: Stat,found
 
+        LOGICAL :: compute_alkali_density=.FALSE.
+
         INTEGER :: i,t,p,q,dim
         TYPE(GaussIntegrationPoints_t) :: IP
         TYPE(ValueList_t), POINTER :: BodyForce, Material, Constants
@@ -187,8 +189,18 @@ CONTAINS
         Material => GetMaterial()
 
         !Let's get the relevent information
-        alkali_density(1:n)=GetReal(Material,'alkali density',found)
-        CALL FoundCheck(found, 'alkali density', 'fatal')
+
+        !Alkali Density-------------------------------------------------
+        compute_alkali_density=GetLogical(Material, 'Compute Alkali Density', found)
+        CALL FoundCheck(found, 'Compute Alkali Density', 'warn')
+
+        IF (compute_alkali_density) THEN
+            alkali_density(1:n) =  GetAlkaliConcentration(Element, n)
+
+        ELSE
+            alkali_density(1:n)=GetReal(Material,'alkali density',found)
+            CALL FoundCheck(found, 'alkali density', 'fatal')
+        END IF
 
         spin_destruction_rate(1:n)=GetReal(Material,'spin destruction rate',found)
         CALL FoundCheck(found, 'spin destruction', 'fatal')
@@ -199,7 +211,7 @@ CONTAINS
         DO i=1,dim
             laser_direction(i,1:n)=GetReal(Material,&
                 'laser direction '//TRIM(I2S(i)),found)
-                CALL FoundCheck(found, 'laser direction', 'fatal')
+            CALL FoundCheck(found, 'laser direction', 'fatal')
         END DO
 
 
@@ -336,7 +348,7 @@ CONTAINS
 
     !------------------------------------------------------------------------------
     SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
-    !------------------------------------------------------------------------------
+        !------------------------------------------------------------------------------
         USE DefUtils
 
         IMPLICIT NONE
@@ -363,7 +375,9 @@ CONTAINS
     END SUBROUTINE FoundCheck
     !-------------------------------------------------------------------------
 
+    !------------------------------------------------------------------------------
     FUNCTION BetaCalc(Model, n, x) RESULT(beta)
+        !------------------------------------------------------------------------------
         USE DefUtils
         IMPLICIT NONE
         TYPE(Model_t), OPTIONAL :: Model
@@ -466,247 +480,284 @@ CONTAINS
 
         beta = 2*DSQRT(RPi*LOG2)*(electron_radius*oscillator_strength*&
             laser_wavelength**2*w_prime)/laser_linewidth
-            !I added a cos term to assure that the laser optical pumping rate goes to zero at the boundaries
-            !of the laser beam area. I was getting some computational artifacts that appeared to be due to the
-            !discontinity at the border.
-            !The factor of 3.14/2 is to account for the difference in area under the curve of a cos and a Heaviside
-            !function.
-            !initopt = 3.14/2*beta*power/(area*plank_constant*laser_frequency)*COS((3.14**(3/2)*SQRT(x(1)**2 + x(2)**2))/(SQRT(area)))
+        !I added a cos term to assure that the laser optical pumping rate goes to zero at the boundaries
+        !of the laser beam area. I was getting some computational artifacts that appeared to be due to the
+        !discontinity at the border.
+        !The factor of 3.14/2 is to account for the difference in area under the curve of a cos and a Heaviside
+        !function.
+        !initopt = 3.14/2*beta*power/(area*plank_constant*laser_frequency)*COS((3.14**(3/2)*SQRT(x(1)**2 + x(2)**2))/(SQRT(area)))
 
 
-            RETURN
+        RETURN
+    !------------------------------------------------------------------------------
+    END FUNCTION
+    !------------------------------------------------------------------------------
 
-        END FUNCTION
+    !We need the FADDEEVA function from equation (A8). Thankfully, someone in the
+        !interweb has coded a nice function to calculate it for me. The ACM has collected
+        !aligorithms to do this very thing. The following code is copied line for line
+        !from ALGORITHM 680, COLLECTED ALGORITHMS FROM ACM.
+        !THIS WORK PUBLISHED IN TRANSACTIONS ON MATHEMATICAL SOFTWARE,
+        !VOL. 16, NO. 1, PP. 47. - http://www.netlib.org/toms/68
 
-        !We need the FADDEEVA function from equation (A8). Thankfully, someone in the
-            !interweb has coded a nice function to calculate it for me. The ACM has collected
-            !aligorithms to do this very thing. The following code is copied line for line
-            !from ALGORITHM 680, COLLECTED ALGORITHMS FROM ACM.
-            !THIS WORK PUBLISHED IN TRANSACTIONS ON MATHEMATICAL SOFTWARE,
-            !VOL. 16, NO. 1, PP. 47. - http://www.netlib.org/toms/68
+        !      ALGORITHM 680, COLLECTED ALGORITHMS FROM ACM.
+        !      THIS WORK PUBLISHED IN TRANSACTIONS ON MATHEMATICAL SOFTWARE,
+        !      VOL. 16, NO. 1, PP. 47.
+    !--------------------------------------------------------------------------
+    SUBROUTINE WOFZ (XI, YI, U, V, FLAG)
+        !
+        !  GIVEN A COMPLEX NUMBER Z = (XI,YI), THIS SUBROUTINE COMPUTES
+        !  THE VALUE OF THE FADDEEVA-FUNCTION W(Z) = EXP(-Z**2)*ERFC(-I*Z),
+        !  WHERE ERFC IS THE COMPLEX COMPLEMENTARY ERROR-FUNCTION AND I
+        !  MEANS SQRT(-1).
+        !  THE ACCURACY OF THE ALGORITHM FOR Z IN THE 1ST AND 2ND QUADRANT
+        !  IS 14 SIGNIFICANT DIGITS; IN THE 3RD AND 4TH IT IS 13 SIGNIFICANT
+        !  DIGITS OUTSIDE A CIRCULAR REGION WITH RADIUS 0.126 AROUND A ZERO
+        !  OF THE FUNCTION.
+        !  ALL REAL VARIABLES IN THE PROGRAM ARE DOUBLE PRECISION.
+        !
+        !
+        !  THE CODE CONTAINS A FEW COMPILER-DEPENDENT PARAMETERS :
+        !     RMAXREAL = THE MAXIMUM VALUE OF RMAXREAL EQUALS THE ROOT OF
+        !                RMAX = THE LARGEST NUMBER WHICH CAN STILL BE
+        !                IMPLEMENTED ON THE COMPUTER IN DOUBLE PRECISION
+        !                FLOATING-POINT ARITHMETIC
+        !     RMAXEXP  = LN(RMAX) - LN(2)
+        !     RMAXGONI = THE LARGEST POSSIBLE ARGUMENT OF A DOUBLE PRECISION
+        !                GONIOMETRIC FUNCTION (DCOS, DSIN, ...)
+        !  THE REASON WHY THESE PARAMETERS ARE NEEDED AS THEY ARE DEFINED WILL
+        !  BE EXPLAINED IN THE CODE BY MEANS OF COMMENTS
+        !
+        !
+        !  PARAMETER LIST
+        !     XI     = REAL      PART OF Z
+        !     YI     = IMAGINARY PART OF Z
+        !     U      = REAL      PART OF W(Z)
+        !     V      = IMAGINARY PART OF W(Z)
+        !     FLAG   = AN ERROR FLAG INDICATING WHETHER OVERFLOW WILL
+        !              OCCUR OR NOT; TYPE LOGICAL;
+        !              THE VALUES OF THIS VARIABLE HAVE THE FOLLOWING
+        !              MEANING :
+        !              FLAG=.FALSE. : NO ERROR CONDITION
+        !              FLAG=.TRUE.  : OVERFLOW WILL OCCUR, THE ROUTINE
+        !                             BECOMES INACTIVE
+        !  XI, YI      ARE THE INPUT-PARAMETERS
+        !  U, V, FLAG  ARE THE OUTPUT-PARAMETERS
+        !
+        !  FURTHERMORE THE PARAMETER FACTOR EQUALS 2/SQRT(PI)
+        !
+        !  THE ROUTINE IS NOT UNDERFLOW-PROTECTED BUT ANY VARIABLE CAN BE
+        !  PUT TO 0 UPON UNDERFLOW;
+        !
+        !  REFERENCE - GPM POPPE, CMJ WIJERS; MORE EFFICIENT COMPUTATION OF
+        !  THE COMPLEX ERROR-FUNCTION, ACM TRANS. MATH. SOFTWARE.
+        !
 
-            !      ALGORITHM 680, COLLECTED ALGORITHMS FROM ACM.
-            !      THIS WORK PUBLISHED IN TRANSACTIONS ON MATHEMATICAL SOFTWARE,
-            !      VOL. 16, NO. 1, PP. 47.
 
-        SUBROUTINE WOFZ (XI, YI, U, V, FLAG)
+        USE DefUtils
+
+        IMPLICIT REAL(KIND=dp) (A-H, O-Z)
+
+        REAL(KIND=dp) ::  KAPN, NP1
+        INTEGER :: NU, I, J
+
+        !DOUBLE PRECISION FACTOR,RMAMXREAL,RMAXEXP,RMAXGONI
+
+        LOGICAL A, B, FLAG
+        PARAMETER (FACTOR   = 1.12837916709551257388D0,&
+            RMAXREAL = 0.5D+154,&
+            RMAXEXP  = 708.50306146160D0,&
+            RMAXGONI = 3.53711887601422D+15)
+
+        FLAG = .FALSE.
+
+        XABS = DABS(XI)
+        YABS = DABS(YI)
+        X    = XABS/6.3
+        Y    = YABS/4.4
+
+        !
+        !     THE FOLLOWING IF-STATEMENT PROTECTS
+        !     QRHO = (X**2 + Y**2) AGAINST OVERFLOW
+        !
+        IF ((XABS.GT.RMAXREAL).OR.(YABS.GT.RMAXREAL)) GOTO 100
+
+        QRHO = X**2 + Y**2
+
+        XABSQ = XABS**2
+        XQUAD = XABSQ - YABS**2
+        YQUAD = 2*XABS*YABS
+
+        A     = QRHO.LT.0.085264D0
+
+        IF (A) THEN
             !
-            !  GIVEN A COMPLEX NUMBER Z = (XI,YI), THIS SUBROUTINE COMPUTES
-            !  THE VALUE OF THE FADDEEVA-FUNCTION W(Z) = EXP(-Z**2)*ERFC(-I*Z),
-            !  WHERE ERFC IS THE COMPLEX COMPLEMENTARY ERROR-FUNCTION AND I
-            !  MEANS SQRT(-1).
-            !  THE ACCURACY OF THE ALGORITHM FOR Z IN THE 1ST AND 2ND QUADRANT
-            !  IS 14 SIGNIFICANT DIGITS; IN THE 3RD AND 4TH IT IS 13 SIGNIFICANT
-            !  DIGITS OUTSIDE A CIRCULAR REGION WITH RADIUS 0.126 AROUND A ZERO
-            !  OF THE FUNCTION.
-            !  ALL REAL VARIABLES IN THE PROGRAM ARE DOUBLE PRECISION.
+            !  IF (QRHO.LT.0.085264D0) THEN THE FADDEEVA-FUNCTION IS EVALUATED
+            !  USING A POWER-SERIES (ABRAMOWITZ/STEGUN, EQUATION (7.1.5), P.297)
+            !  N IS THE MINIMUM NUMBER OF TERMS NEEDED TO OBTAIN THE REQUIRED
+            !  ACCURACY
             !
+            QRHO  = (1-0.85*Y)*DSQRT(QRHO)
+            N     = IDNINT(6 + 72*QRHO)
+            J     = 2*N+1
+            XSUM  = 1.0/J
+            YSUM  = 0.0D0
+            DO 10 I=N, 1, -1
+                J    = J - 2
+                XAUX = (XSUM*XQUAD - YSUM*YQUAD)/I
+                YSUM = (XSUM*YQUAD + YSUM*XQUAD)/I
+                XSUM = XAUX + 1.0/J
+10          CONTINUE
+            U1   = -FACTOR*(XSUM*YABS + YSUM*XABS) + 1.0
+            V1   =  FACTOR*(XSUM*XABS - YSUM*YABS)
+            DAUX =  DEXP(-XQUAD)
+            U2   =  DAUX*DCOS(YQUAD)
+            V2   = -DAUX*DSIN(YQUAD)
+
+            U    = U1*U2 - V1*V2
+            V    = U1*V2 + V1*U2
+
+        ELSE
             !
-            !  THE CODE CONTAINS A FEW COMPILER-DEPENDENT PARAMETERS :
-            !     RMAXREAL = THE MAXIMUM VALUE OF RMAXREAL EQUALS THE ROOT OF
-            !                RMAX = THE LARGEST NUMBER WHICH CAN STILL BE
-            !                IMPLEMENTED ON THE COMPUTER IN DOUBLE PRECISION
-            !                FLOATING-POINT ARITHMETIC
-            !     RMAXEXP  = LN(RMAX) - LN(2)
-            !     RMAXGONI = THE LARGEST POSSIBLE ARGUMENT OF A DOUBLE PRECISION
-            !                GONIOMETRIC FUNCTION (DCOS, DSIN, ...)
-            !  THE REASON WHY THESE PARAMETERS ARE NEEDED AS THEY ARE DEFINED WILL
-            !  BE EXPLAINED IN THE CODE BY MEANS OF COMMENTS
+            !  IF (QRHO.GT.1.O) THEN W(Z) IS EVALUATED USING THE LAPLACE
+            !  CONTINUED FRACTION
+            !  NU IS THE MINIMUM NUMBER OF TERMS NEEDED TO OBTAIN THE REQUIRED
+            !  ACCURACY
             !
-            !
-            !  PARAMETER LIST
-            !     XI     = REAL      PART OF Z
-            !     YI     = IMAGINARY PART OF Z
-            !     U      = REAL      PART OF W(Z)
-            !     V      = IMAGINARY PART OF W(Z)
-            !     FLAG   = AN ERROR FLAG INDICATING WHETHER OVERFLOW WILL
-            !              OCCUR OR NOT; TYPE LOGICAL;
-            !              THE VALUES OF THIS VARIABLE HAVE THE FOLLOWING
-            !              MEANING :
-            !              FLAG=.FALSE. : NO ERROR CONDITION
-            !              FLAG=.TRUE.  : OVERFLOW WILL OCCUR, THE ROUTINE
-            !                             BECOMES INACTIVE
-            !  XI, YI      ARE THE INPUT-PARAMETERS
-            !  U, V, FLAG  ARE THE OUTPUT-PARAMETERS
-            !
-            !  FURTHERMORE THE PARAMETER FACTOR EQUALS 2/SQRT(PI)
-            !
-            !  THE ROUTINE IS NOT UNDERFLOW-PROTECTED BUT ANY VARIABLE CAN BE
-            !  PUT TO 0 UPON UNDERFLOW;
-            !
-            !  REFERENCE - GPM POPPE, CMJ WIJERS; MORE EFFICIENT COMPUTATION OF
-            !  THE COMPLEX ERROR-FUNCTION, ACM TRANS. MATH. SOFTWARE.
+            !  IF ((QRHO.GT.0.085264D0).AND.(QRHO.LT.1.0)) THEN W(Z) IS EVALUATED
+            !  BY A TRUNCATED TAYLOR EXPANSION, WHERE THE LAPLACE CONTINUED FRACTION
+            !  IS USED TO CALCULATE THE DERIVATIVES OF W(Z)
+            !  KAPN IS THE MINIMUM NUMBER OF TERMS IN THE TAYLOR EXPANSION NEEDED
+            !  TO OBTAIN THE REQUIRED ACCURACY
+            !  NU IS THE MINIMUM NUMBER OF TERMS OF THE CONTINUED FRACTION NEEDED
+            !  TO CALCULATE THE DERIVATIVES WITH THE REQUIRED ACCURACY
             !
 
+            IF (QRHO.GT.1.0) THEN
+                H    = 0.0D0
+                KAPN = 0
+                QRHO = DSQRT(QRHO)
+                NU   = IDINT(3 + (1442/(26*QRHO+77)))
+            ELSE
+                QRHO = (1-Y)*DSQRT(1-QRHO)
+                H    = 1.88*QRHO
+                H2   = 2*H
+                KAPN = IDNINT(7  + 34*QRHO)
+                NU   = IDNINT(16 + 26*QRHO)
+            ENDIF
 
-            USE DefUtils
+            B = (H.GT.0.0)
 
-            IMPLICIT REAL(KIND=dp) (A-H, O-Z)
+            IF (B) QLAMBDA = H2**KAPN
 
-            REAL(KIND=dp) ::  KAPN, NP1
-            INTEGER :: NU, I, J
+            RX = 0.0
+            RY = 0.0
+            SX = 0.0
+            SY = 0.0
 
-            !DOUBLE PRECISION FACTOR,RMAMXREAL,RMAXEXP,RMAXGONI
+            DO 11 N=NU, 0, -1
+                NP1 = N + 1
+                TX  = YABS + H + NP1*RX
+                TY  = XABS - NP1*RY
+                C   = 0.5/(TX**2 + TY**2)
+                RX  = C*TX
+                RY  = C*TY
+                IF ((B).AND.(N.LE.KAPN)) THEN
+                    TX = QLAMBDA + SX
+                    SX = RX*TX - RY*SY
+                    SY = RY*TX + RX*SY
+                    QLAMBDA = QLAMBDA/H2
+                ENDIF
+11          CONTINUE
 
-            LOGICAL A, B, FLAG
-            PARAMETER (FACTOR   = 1.12837916709551257388D0,&
-                RMAXREAL = 0.5D+154,&
-                RMAXEXP  = 708.50306146160D0,&
-                RMAXGONI = 3.53711887601422D+15)
+            IF (H.EQ.0.0) THEN
+                U = FACTOR*RX
+                V = FACTOR*RY
+            ELSE
+                U = FACTOR*SX
+                V = FACTOR*SY
+            END IF
 
-            FLAG = .FALSE.
+            IF (YABS.EQ.0.0) U = DEXP(-XABS**2)
 
-            XABS = DABS(XI)
-            YABS = DABS(YI)
-            X    = XABS/6.3
-            Y    = YABS/4.4
+        END IF
 
-            !
-            !     THE FOLLOWING IF-STATEMENT PROTECTS
-            !     QRHO = (X**2 + Y**2) AGAINST OVERFLOW
-            !
-            IF ((XABS.GT.RMAXREAL).OR.(YABS.GT.RMAXREAL)) GOTO 100
 
-            QRHO = X**2 + Y**2
+        !
+        !  EVALUATION OF W(Z) IN THE OTHER QUADRANTS
+        !
 
-            XABSQ = XABS**2
-            XQUAD = XABSQ - YABS**2
-            YQUAD = 2*XABS*YABS
-
-            A     = QRHO.LT.0.085264D0
+        IF (YI.LT.0.0) THEN
 
             IF (A) THEN
-                !
-                !  IF (QRHO.LT.0.085264D0) THEN THE FADDEEVA-FUNCTION IS EVALUATED
-                !  USING A POWER-SERIES (ABRAMOWITZ/STEGUN, EQUATION (7.1.5), P.297)
-                !  N IS THE MINIMUM NUMBER OF TERMS NEEDED TO OBTAIN THE REQUIRED
-                !  ACCURACY
-                !
-                QRHO  = (1-0.85*Y)*DSQRT(QRHO)
-                N     = IDNINT(6 + 72*QRHO)
-                J     = 2*N+1
-                XSUM  = 1.0/J
-                YSUM  = 0.0D0
-                DO 10 I=N, 1, -1
-                    J    = J - 2
-                    XAUX = (XSUM*XQUAD - YSUM*YQUAD)/I
-                    YSUM = (XSUM*YQUAD + YSUM*XQUAD)/I
-                    XSUM = XAUX + 1.0/J
-10              CONTINUE
-                U1   = -FACTOR*(XSUM*YABS + YSUM*XABS) + 1.0
-                V1   =  FACTOR*(XSUM*XABS - YSUM*YABS)
-                DAUX =  DEXP(-XQUAD)
-                U2   =  DAUX*DCOS(YQUAD)
-                V2   = -DAUX*DSIN(YQUAD)
-
-                U    = U1*U2 - V1*V2
-                V    = U1*V2 + V1*U2
-
+                U2    = 2*U2
+                V2    = 2*V2
             ELSE
+                XQUAD =  -XQUAD
+
                 !
-                !  IF (QRHO.GT.1.O) THEN W(Z) IS EVALUATED USING THE LAPLACE
-                !  CONTINUED FRACTION
-                !  NU IS THE MINIMUM NUMBER OF TERMS NEEDED TO OBTAIN THE REQUIRED
-                !  ACCURACY
+                !         THE FOLLOWING IF-STATEMENT PROTECTS 2*EXP(-Z**2)
+                !         AGAINST OVERFLOW
                 !
-                !  IF ((QRHO.GT.0.085264D0).AND.(QRHO.LT.1.0)) THEN W(Z) IS EVALUATED
-                !  BY A TRUNCATED TAYLOR EXPANSION, WHERE THE LAPLACE CONTINUED FRACTION
-                !  IS USED TO CALCULATE THE DERIVATIVES OF W(Z)
-                !  KAPN IS THE MINIMUM NUMBER OF TERMS IN THE TAYLOR EXPANSION NEEDED
-                !  TO OBTAIN THE REQUIRED ACCURACY
-                !  NU IS THE MINIMUM NUMBER OF TERMS OF THE CONTINUED FRACTION NEEDED
-                !  TO CALCULATE THE DERIVATIVES WITH THE REQUIRED ACCURACY
-                !
+                IF ((YQUAD.GT.RMAXGONI).OR.&
+                    (XQUAD.GT.RMAXEXP)) GOTO 100
 
-                IF (QRHO.GT.1.0) THEN
-                    H    = 0.0D0
-                    KAPN = 0
-                    QRHO = DSQRT(QRHO)
-                    NU   = IDINT(3 + (1442/(26*QRHO+77)))
-                ELSE
-                    QRHO = (1-Y)*DSQRT(1-QRHO)
-                    H    = 1.88*QRHO
-                    H2   = 2*H
-                    KAPN = IDNINT(7  + 34*QRHO)
-                    NU   = IDNINT(16 + 26*QRHO)
-                ENDIF
-
-                B = (H.GT.0.0)
-
-                IF (B) QLAMBDA = H2**KAPN
-
-                RX = 0.0
-                RY = 0.0
-                SX = 0.0
-                SY = 0.0
-
-                DO 11 N=NU, 0, -1
-                    NP1 = N + 1
-                    TX  = YABS + H + NP1*RX
-                    TY  = XABS - NP1*RY
-                    C   = 0.5/(TX**2 + TY**2)
-                    RX  = C*TX
-                    RY  = C*TY
-                    IF ((B).AND.(N.LE.KAPN)) THEN
-                        TX = QLAMBDA + SX
-                        SX = RX*TX - RY*SY
-                        SY = RY*TX + RX*SY
-                        QLAMBDA = QLAMBDA/H2
-                    ENDIF
-11              CONTINUE
-
-                IF (H.EQ.0.0) THEN
-                    U = FACTOR*RX
-                    V = FACTOR*RY
-                ELSE
-                    U = FACTOR*SX
-                    V = FACTOR*SY
-                END IF
-
-                IF (YABS.EQ.0.0) U = DEXP(-XABS**2)
-
+                W1 =  2*DEXP(XQUAD)
+                U2  =  W1*DCOS(YQUAD)
+                V2  = -W1*DSIN(YQUAD)
             END IF
 
+            U = U2 - U
+            V = V2 - V
+            IF (XI.GT.0.0) V = -V
+        ELSE
+            IF (XI.LT.0.0) V = -V
+        END IF
 
-            !
-            !  EVALUATION OF W(Z) IN THE OTHER QUADRANTS
-            !
+        RETURN
 
-            IF (YI.LT.0.0) THEN
+100     FLAG = .TRUE.
+        RETURN
 
-                IF (A) THEN
-                    U2    = 2*U2
-                    V2    = 2*V2
-                ELSE
-                    XQUAD =  -XQUAD
-
-                    !
-                    !         THE FOLLOWING IF-STATEMENT PROTECTS 2*EXP(-Z**2)
-                    !         AGAINST OVERFLOW
-                    !
-                    IF ((YQUAD.GT.RMAXGONI).OR.&
-                        (XQUAD.GT.RMAXEXP)) GOTO 100
-
-                    W1 =  2*DEXP(XQUAD)
-                    U2  =  W1*DCOS(YQUAD)
-                    V2  = -W1*DSIN(YQUAD)
-                END IF
-
-                U = U2 - U
-                V = V2 - V
-                IF (XI.GT.0.0) V = -V
-            ELSE
-                IF (XI.LT.0.0) V = -V
-            END IF
-
-            RETURN
-
-100         FLAG = .TRUE.
-            RETURN
-
-        END SUBROUTINE WOFZ
+    !--------------------------------------------------------------------------
+    END SUBROUTINE WOFZ
+        !--------------------------------------------------------------------------
 
 
     !------------------------------------------------------------------------------
-    END SUBROUTINE OPSolver
+    FUNCTION GetAlkaliConcentration(Element, n) RESULT(alkali_density)
+        USE DefUtils
+        !--------------------------------------------------------------------------
+        INTEGER, INTENT(IN) :: n
+        TYPE(Element_t), POINTER, INTENT(IN) :: Element
+        !--------------------------------------------------------------------------
+        REAL(KIND=dp) :: alkali_density(n)
+        TYPE(ValueList_t), POINTER :: Materials
+        LOGICAL :: convert_density = .FALSE.
+        INTEGER :: ind = 0
+
+        alkali_density = 0.0D0
+
+        Materials => GetMaterial()
+
+        CALL GetScalarLocalSolution(alkali_density, 'Concentration', Element)
+
+        !Check to make sure we actually found the solution
+        DO ind = 1, n
+
+
+            IF (alkali_density(ind) .EQ. 0) Call Fatal('GetAlkaliConcentration',&
+                'Concentration variable not found. Check name of AdvectDiff variable.')
+
+        END DO
+
+        IF (convert_density) THEN
+            alkali_density(1:n) = 7.043279D24*alkali_density
+        END IF
+
+
+
+    END FUNCTION GetAlkaliConcentration
+!------------------------------------------------------------------------------
+END SUBROUTINE OPSolver
 !------------------------------------------------------------------------------
