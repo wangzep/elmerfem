@@ -5,6 +5,7 @@ Header :: Mesh DB "." "square"
 Constants
   alkali wavelength = Real 800.0D-9
   alkali frequency width = Real 126.65D9
+  alkali temperature = Real 433.15
 
   laser wavelength = Real 800.0D-9
   laser line width = Real 2.0D-9
@@ -28,19 +29,33 @@ Body 1
 End
 
 Material 1
-  Compute Alkali Density = LOGICAL True
-  
-  !alkali density = Real 3
-  !alkali density = Real 1e19
+  !alkali density = Real MATC
+  alkali density = Variable Concentration; Real MATC "tx"  
 
-  Compute Spin Destruction Rate = LOGICAL False
-  spin destruction rate = Real 3
+
+  !spin destruction rate = Real 3
   !spin destruction rate = Real 2.1D4
+  spin destruction rate = Variable Concentration, Temperature, Pressure,
+  Real Procedure "OPSolver" "CalculateSpinDestructionRate"
+
+  alkali-alkali spin destruction rate = Real 3.9e-16
+
+  xe spin destruction rate = Real 6e-17
+
+  Helium Spin Destruction Term Included= LOGICAL False
+  Nitrogen Spin Destruction Term Included = LOGICAL True
+  Xenon Spin Destruction Term Included = LOGICAL True
+  vander Wall Spin Destruction Term Included = LOGICAL True
+
+  xe fraction = Real 0.5
+  n2 fraction = Real 0.5
+  he fraction = Real 0
 
   laser direction 1 = Real 1
   laser direction 2 = Real 0 
 
-  Density = 1.3
+  convert density = LOGICAL False
+  Density = 1
   Concentration Diffusivity = Real 1.0e-3 
 End
 
@@ -53,6 +68,7 @@ Solver 1
   Steady State Convergence Tolerance = 1e-9
   Nonlinear System Max Iterations = 20
   Nonlinear System Convergence Tolerance = 1e-9
+
 End
 
 Solver 2
@@ -60,37 +76,56 @@ Equation = Advection Diffusion
   Variable = Concentration
   Variable DOFs = 1
   Procedure = "AdvectionDiffusion" "AdvectionDiffusionSolver"
-  Linear System Solver = Iterative
-  Linear System Iterative Method = BiCGStab
-  Linear System Max Iterations = 200
-  Linear System Convergence Tolerance = 1.0e-08
-  Linear System Preconditioning = ILU1
-  Linear System ILUT Tolerance = 1.0e-03
-  Nonlinear System Max Iterations = 1
-  Nonlinear System Convergence Tolerance = 1.0e-4
-  Nonlinear System Newton After Tolerance = 1.0e-3
-  Nonlinear System Newton After Iterations = 10
-  Nonlinear System Relaxation Factor = 1
-  Steady State Convergence Tolerance = 1.0e-4
-! Stabilize = False  ! this is default
-  Bubbles = False
+  Exec Solver = Never
+End
+
+Solver 3
+  Equation = Navier-Stokes
+  Flow Model = Full
+  Procedure = "FlowSolve" "FlowSolver"
+  Variable = Flow Solution[Velocity:3 Pressure:1]
+  Exec Solver = Never
+End
+
+Solver 4
+  Equation = Heat Equation
+  Variable = Temperature
+  Steady State Convergence Tolerance = 1e-4
+  Exec Solver = Never
+End
+
+Solver 5
+  Exec Solver = Always
+  Procedure = File "SaveData" "SaveMaterials"
+  Parameter 1 = String spin destruction rate
 End
 
 Equation 1
-  Active Solvers(2) = 1 2
+  Active Solvers(5) = 1 2 3 4 5
 End
 
 Boundary Condition 1
   Target Boundaries(1) = 1
-  optrate = Real 1
-  !optrate = Real 2.4e5
-  Concentration = Real 3
+  !optrate = Real 1
+  optrate = Real 2.4e5
+
+  Concentration = Variable optrate 
+  Procedure "OPSolver" "calculaterbmumdensitycm"
+
+  Pressure = 5e5
+
+  Temperature = 430
 End
 
 Initial Condition 1
   optrate = Real 1
   !optrate = Real 2.4e5
-  Concentration = Real 3
+  Concentration = Variable optrate 
+  Procedure "OPSolver" "calculaterbmumdensitycm"
+
+  Pressure = 5e5
+
+  Temperature = 430
 End
 
 !Solver 1 :: Reference Norm = Real 1.0578593

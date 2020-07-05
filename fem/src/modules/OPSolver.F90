@@ -65,6 +65,9 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
     LOGICAL :: found, newton = .FALSE., beta_solve=.FALSE.
     !------------------------------------------------------------------------------
 
+    ! Factor to convert alkali density from kg/m^3 to part/m^3, I think this is only valid for rubidium
+    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
+
     ! * Again, this is boiler plate code for Elmer Solvers
 
     CALL DefaultStart()
@@ -160,7 +163,7 @@ CONTAINS
 
         LOGICAL :: Stat,found
 
-        LOGICAL :: compute_alkali_density=.FALSE.
+        LOGICAL :: convert_density=.FALSE.
 
         INTEGER :: i,t,p,q,dim
         TYPE(GaussIntegrationPoints_t) :: IP
@@ -191,16 +194,20 @@ CONTAINS
         !Let's get the relevent information
 
         !Alkali Density-------------------------------------------------
-        compute_alkali_density=GetLogical(Material, 'Compute Alkali Density', found)
-        CALL FoundCheck(found, 'Compute Alkali Density', 'warn')
 
-        IF (compute_alkali_density) THEN
-            alkali_density(1:n) =  GetAlkaliConcentration(Element, n)
+        alkali_density(1:n)=GetReal(Material,'alkali density',found)
+        CALL FoundCheck(found, 'alkali density', 'fatal')
 
-        ELSE
-            alkali_density(1:n)=GetReal(Material,'alkali density',found)
-            CALL FoundCheck(found, 'alkali density', 'fatal')
+        convert_density=GetLogical(Material, 'Convert Density')
+        CALL FoundCheck(found, 'Convert Density', 'warn')
+
+        IF (convert_density) THEN
+            alkali_density = rb_density_conversion_factor*alkali_density
         END IF
+
+
+
+        ! Spin destruction Rate--------------------------------------
 
         spin_destruction_rate(1:n)=GetReal(Material,'spin destruction rate',found)
         CALL FoundCheck(found, 'spin destruction', 'fatal')
@@ -347,33 +354,7 @@ CONTAINS
     !------------------------------------------------------------------------------
 
     !------------------------------------------------------------------------------
-    SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
-        !------------------------------------------------------------------------------
-        USE DefUtils
 
-        IMPLICIT NONE
-
-        LOGICAL, INTENT(IN) :: found
-        CHARACTER(len=*), INTENT(IN) :: name
-        CHARACTER(len=*), INTENT(IN) :: warn_fatal_flag
-        CHARACTER(len=len(name)+28) :: outputstring
-
-        !Putting together the text to be printed with the warning or fatal warning.
-
-        outputstring=TRIM('The parameter '//name//' was not found')
-
-
-        IF (.NOT. found) THEN
-            IF (warn_fatal_flag .EQ. 'warn') THEN
-                CALL Warn('OPSolver', outputstring)
-            ELSE
-                CALL Fatal('OPSolver', outputstring)
-            END IF
-        END IF
-
-    !-------------------------------------------------------------------------
-    END SUBROUTINE FoundCheck
-    !-------------------------------------------------------------------------
 
     !------------------------------------------------------------------------------
     FUNCTION BetaCalc(Model, n, x) RESULT(beta)
@@ -725,39 +706,243 @@ CONTAINS
 
 
     !------------------------------------------------------------------------------
-    FUNCTION GetAlkaliConcentration(Element, n) RESULT(alkali_density)
-        USE DefUtils
-        !--------------------------------------------------------------------------
-        INTEGER, INTENT(IN) :: n
-        TYPE(Element_t), POINTER, INTENT(IN) :: Element
-        !--------------------------------------------------------------------------
-        REAL(KIND=dp) :: alkali_density(n)
-        TYPE(ValueList_t), POINTER :: Materials
-        LOGICAL :: convert_density = .FALSE.
-        INTEGER :: ind = 0
+    !    FUNCTION GetAlkaliConcentration(Element, n) RESULT(alkali_density)
+    !        USE DefUtils
+    !        !--------------------------------------------------------------------------
+    !        INTEGER, INTENT(IN) :: n
+    !        TYPE(Element_t), POINTER, INTENT(IN) :: Element
+    !        !--------------------------------------------------------------------------
+    !        REAL(KIND=dp) :: alkali_density(n)
+    !        TYPE(ValueList_t), POINTER :: Materials
+    !        LOGICAL :: convert_density = .FALSE.
+    !        INTEGER :: ind = 0
+    !
+    !        alkali_density = 0.0D0
+    !
+    !        Materials => GetMaterial()
+    !
+    !        CALL GetScalarLocalSolution(alkali_density, 'Concentration', Element)
+    !
+    !        !Check to make sure we actually found the solution
+    !        DO ind = 1, n
+    !
+    !
+    !            IF (alkali_density(ind) .EQ. 0) Call Fatal('GetAlkaliConcentration',&
+    !                'Concentration variable not found. Check name of AdvectDiff variable.')
+    !
+    !        END DO
+    !
+    !        IF (convert_density) THEN
+    !            alkali_density(1:n) = 7.043279D24*alkali_density
+    !        END IF
+    !
+    !
+    !
+    !    END FUNCTION GetAlkaliConcentration
 
-        alkali_density = 0.0D0
 
-        Materials => GetMaterial()
-
-        CALL GetScalarLocalSolution(alkali_density, 'Concentration', Element)
-
-        !Check to make sure we actually found the solution
-        DO ind = 1, n
-
-
-            IF (alkali_density(ind) .EQ. 0) Call Fatal('GetAlkaliConcentration',&
-                'Concentration variable not found. Check name of AdvectDiff variable.')
-
-        END DO
-
-        IF (convert_density) THEN
-            alkali_density(1:n) = 7.043279D24*alkali_density
-        END IF
-
-
-
-    END FUNCTION GetAlkaliConcentration
 !------------------------------------------------------------------------------
 END SUBROUTINE OPSolver
 !------------------------------------------------------------------------------
+
+FUNCTION calculaterbmumdensitycm(Model,n,Temp) RESULT(RbNumDensity_cm)
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: model
+    INTEGER :: n
+    REAL(KIND=dp) :: Temp !Dummy Variable. Not actually used
+    REAL(KIND=dp) :: RbNumDensity_cm, Temperature
+    LOGICAL :: found=.FALSE.
+    !------------------------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials
+    !-----------------------------------------------------------------------
+
+    Materials => GetConstants()
+
+    Temperature=GetConstReal(Materials, 'alkali temperature', found)
+    IF (.NOT. found) CALL Fatal('RbNumDensity',&
+        'Temperature not found')
+
+
+    RbNumDensity_cm=(10**(10.55-4132/Temperature))/(1.38D-16*Temperature)
+
+
+END FUNCTION calculaterbmumdensitycm
+
+FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
+    RESULT(SpinDestrucionRate)
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: model
+    INTEGER :: n
+    REAL(KIND=dp) :: argument(3)
+    REAL(KIND=dp) :: Temperature, Concentration, Pressure, SpinDestrucionRate
+    !----------------------------------------------------------------------
+
+    REAL(KIND=dp) :: alkali_alkali_spin_destruction_rate, xe_spin_destruction_rate
+    REAL(KIND=dp) :: xe_fraction, n2_fraction, he_fraction, xe_pressure,&
+        he_pressure, n2_pressure,tot_pressure_amg, ref_pressure
+    !-----------------------------------------------------------------
+    INTEGER :: ind
+    !-----------------------------------------------------------------
+    LOGICAL :: convert_density=.FALSE., he_term_included=.FALSE.
+    LOGICAL :: n2_term_included=.FALSE., vanderWall_term_included=.FALSE.
+    LOGICAL :: xe_term_included=.FALSE., local_temperature_used = .FALSE.
+    LOGICAL :: local_pressure_used = .FALSE., found=.FALSE.
+    !--------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials
+    !--------------------------------------------------------------
+
+
+
+    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
+
+    SpinDestrucionRate = 0.0D0
+
+    Materials => GetMaterial()
+
+    !!!!!!!!!!!!!!!!!!!Alkali-Alkali Spin Destruction Term!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    alkali_alkali_spin_destruction_rate=&
+        GetConstReal(Materials, 'alkali-alkali spin destruction rate', found)
+    CALL FoundCheck(found, 'alkali-alkali spin destruction rate','fatal')
+
+    ! Assign the Concentration
+    Concentration=argument(1)
+
+    !Check if we should convert the density (we probably do want to
+    convert_density=GetLogical(Materials, 'convert density', found)
+    CALL FoundCheck(found, 'convert density', 'warn')
+
+    !Convert the alkali density to particles/m^3
+    IF (convert_density) THEN
+        Concentration = rb_density_conversion_factor*Concentration
+    END IF
+
+    SpinDestrucionRate=alkali_alkali_spin_destruction_rate*Concentration
+
+    !Inclusion of other terms in the spin-destruction rate: He-Rb, N2-Rb,
+    !and Van der Walls terms
+
+    he_term_included=GetLogical(Materials,&
+        'Helium Spin Destruction Term Included',found)
+
+    n2_term_included = GetLogical(Materials,&
+        'Nitrogen Spin Destruction Term Included',found)
+
+    xe_term_included = GetLogical(Materials,&
+        'Xenon Spin Destruction Term Included',found)
+
+    vanderWall_term_included = GetLogical(Materials,&
+        'vander Wall Spin Destruction Term Included',found)
+
+    IF (he_term_included .OR. n2_term_included .OR. &
+        xe_term_included .OR. vanderWall_term_included) THEN
+
+        !Get the temperature
+
+        Temperature = argument(2)
+
+        IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+            'Temperature variable not found.')
+
+
+        !Get the pressure
+
+        Pressure = argument(3)
+
+        !Check to make sure we actually found the solution
+
+
+        IF (Pressure .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+            'Pressure variable not found. Check name of N-S variable.')
+
+
+        !Get the gas fractions
+        xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+        CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+        n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+        CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+        he_fraction = GetConstReal(Materials, 'he fraction', found)
+        CALL FoundCheck(found, 'he fraction', 'fatal')
+
+
+        !Call fatal if the gas fractions don't add to 1
+
+        IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
+            CALL Fatal('GetSpinDestructionRate', &
+                'Gas fractions do not add to 1')
+        END IF
+
+        !Calculate pressure in amagats
+
+        tot_pressure_amg = ((Pressure)/101325)*(273.15/Temperature)
+
+        xe_pressure=tot_pressure_amg*xe_fraction
+
+        n2_pressure=tot_pressure_amg*n2_fraction
+
+        he_pressure=tot_pressure_amg*he_fraction
+
+        !Implement the xenon contribution to spin destruction rate
+        IF (xe_term_included) THEN
+
+            xe_spin_destruction_rate = 0.0D0
+            xe_spin_destruction_rate = GetConstReal(Materials,&
+                'xe spin destruction rate',found)
+            CALL FoundCheck(found, 'xe spin destruction rate', 'fatal')
+
+            SpinDestrucionRate= SpinDestrucionRate+&
+                xe_spin_destruction_rate*xe_pressure
+
+        END IF
+
+        !Implement helium contribution to spin destruction rate
+        IF (he_term_included) THEN
+            SpinDestrucionRate = SpinDestrucionRate+&
+                24.6*(1+(Temperature+273.15-90)/94.6)*he_pressure
+        END IF
+
+        !Implement N2 contribution to spin destruction rate
+        IF (n2_term_included) THEN
+            SpinDestrucionRate=SpinDestrucionRate+&
+                170*(1+(Temperature+273.15-90)/194.36)*n2_pressure
+        END IF
+
+        !Implement van der Walls contribution to spin destruction rate
+        IF (vanderWall_term_included) THEN
+            SpinDestrucionRate=SpinDestrucionRate+&
+                6469/(xe_fraction+1.1*n2_fraction+3.2*he_fraction)
+        END IF
+    END IF
+
+END FUNCTION CalculateSpinDestructionRate
+
+SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
+    !------------------------------------------------------------------------------
+    USE DefUtils
+
+    IMPLICIT NONE
+
+    LOGICAL, INTENT(IN) :: found
+    CHARACTER(len=*), INTENT(IN) :: name
+    CHARACTER(len=*), INTENT(IN) :: warn_fatal_flag
+    CHARACTER(len=len(name)+28) :: outputstring
+
+    !Putting together the text to be printed with the warning or fatal warning.
+
+    outputstring=TRIM('The parameter '//name//' was not found')
+
+
+    IF (.NOT. found) THEN
+        IF (warn_fatal_flag .EQ. 'warn') THEN
+            CALL Warn('OPSolver', outputstring)
+        ELSE
+            CALL Fatal('OPSolver', outputstring)
+        END IF
+    END IF
+
+!-------------------------------------------------------------------------
+END SUBROUTINE FoundCheck
