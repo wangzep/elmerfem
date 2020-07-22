@@ -62,7 +62,8 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
     REAL(KIND=dp) :: beta
     INTEGER :: n, nb, nd, t, active
     INTEGER :: iter, maxiter, newton_interations
-    LOGICAL :: found, newton = .FALSE., beta_solve=.FALSE.
+    LOGICAL :: found, newton = .FALSE., beta_solve=.FALSE.,&
+        laser_power_use=.FALSE.
     !------------------------------------------------------------------------------
 
     ! Factor to convert alkali density from kg/m^3 to part/m^3, I think this is only valid for rubidium
@@ -121,15 +122,23 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
 
         CALL DefaultFinishBulkAssembly()
 
-        Active = GetNOFBoundaryElements()
-        DO t=1,Active
-            Element => GetBoundaryElement(t)
-            IF(ActiveBoundaryElement()) THEN
-                n  = GetElementNOFNodes()
-                nd = GetElementNOFDOFs()
-                CALL LocalMatrixBC(  Element, n, nd )
-            END IF
-        END DO
+        laser_power_use=GetLogical(Model%Constants, 'Compute Laser Power', found)
+        CALL FoundCheck(found, 'Compute Laser Power', 'warn')
+
+
+        !Calculate the inital optical pumping rate using laser power.
+
+        IF (laser_power_use) THEN
+            Active = GetNOFBoundaryElements()
+            DO t=1,Active
+                Element => GetBoundaryElement(t)
+                IF(ActiveBoundaryElement()) THEN
+                    n  = GetElementNOFNodes()
+                    nd = GetElementNOFDOFs()
+                    CALL CalcLaserPowerBC( Model, Element, n, nd,beta )
+                END IF
+            END DO
+        END IF
 
         CALL DefaultFinishBoundaryAssembly()
         CALL DefaultFinishAssembly()
@@ -286,19 +295,25 @@ CONTAINS
 
     ! Assembly of the matrix entries arising from the Neumann and Robin conditions
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrixBC( Element, n, nd )
+    SUBROUTINE CalcLaserPowerBC( Model, Element, n, nd , beta)
         !------------------------------------------------------------------------------
         INTEGER :: n, nd
         TYPE(Element_t), POINTER :: Element
         !------------------------------------------------------------------------------
-        REAL(KIND=dp) :: Flux(n), Coeff(n), Ext_t(n), F,C,Ext, Weight
-        REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
-        REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd), LOAD(n)
-        LOGICAL :: Stat,found
-        INTEGER :: i,t,p,q,dim
-        TYPE(GaussIntegrationPoints_t) :: IP
+        !        REAL(KIND=dp) :: Flux(n), Coeff(n), Ext_t(n), F,C,Ext, Weight
+        !        REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
+        !        REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd), LOAD(n)
+        LOGICAL :: Stat,found, found1, found2
+        INTEGER :: dim
+        !        INTEGER :: i,t,p,q,dim
+        !        TYPE(GaussIntegrationPoints_t) :: IP
 
-        TYPE(ValueList_t), POINTER :: BC
+        REAL(KIND=dp) :: laserdiameter, laserpower, beta, oprate
+        TYPE(ValueList_t), POINTER :: BC, Constants
+        TYPE(Model_t) :: Model
+
+        REAL(KIND=dp) :: plank_constant, speed_of_light, laser_frequency,&
+            laser_wavelength
 
         TYPE(Nodes_t) :: Nodes
         SAVE Nodes
@@ -306,54 +321,62 @@ CONTAINS
         BC => GetBC()
         IF (.NOT.ASSOCIATED(BC) ) RETURN
 
+        !Constants=GetConstants()
+
+        laser_wavelength = GetConstReal(Model%Constants,'laser wavelength',found)
+        CALL FoundCheck(found, 'laser wavelength', 'fatal')
+
+
+
         dim = CoordinateSystemDimension()
 
-        CALL GetElementNodes( Nodes )
-        STIFF = 0._dp
-        FORCE = 0._dp
-        LOAD = 0._dp
+        plank_constant = GetConstReal(Model%Constants, 'Planks Constant',found1)
+        speed_of_light = GetConstReal(Model%Constants,'speed of light',found2)
 
-        Flux(1:n)  = GetReal( BC,'field flux', found )
-        Coeff(1:n) = GetReal( BC,'robin coefficient', found )
-        Ext_t(1:n) = GetReal( BC,'external field', found )
+        IF (.NOT. (found1 .AND. found2)) THEN
 
-        ! Numerical integration:
-        !-----------------------
-        IP = GaussPoints( Element )
-        DO t=1,IP % n
-            ! Basis function values & derivatives at the integration point:
-            !--------------------------------------------------------------
-            stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), &
-                IP % W(t), detJ, Basis, dBasisdx )
+            plank_constant = 6.62607004D-34
+            speed_of_light = 299792458.0D0
 
-            Weight = IP % s(t) * DetJ
+!            CALL Warn('BetaCalc',&
+!                'One or more of the constants are not listed in the SIF. Using default values SI units.')
+        END IF
 
-            ! Evaluate terms at the integration point:
-            !------------------------------------------
+        laserdiameter=GetConstReal(Model%Constants, 'Laser Spot Size', found)
+        CALL FoundCheck(found, 'Laser Spot Size', 'fatal')
 
-            ! Given flux:
-            ! -----------
-            F = SUM(Basis(1:n)*flux(1:n))
+        laserpower=GetConstReal(BC, 'Laser Power', found)
+        IF (.NOT. found) RETURN !If the BC isn't there for this element, we shouldn't set it
 
-            ! Robin condition (C*(u-u_0)):
-            ! ---------------------------
-            C = SUM(Basis(1:n)*coeff(1:n))
-            Ext = SUM(Basis(1:n)*ext_t(1:n))
+        laser_frequency = speed_of_light/laser_wavelength
 
-            DO p=1,nd
-                DO q=1,nd
-                    STIFF(p,q) = STIFF(p,q) + Weight * C * Basis(q) * Basis(p)
-                END DO
-            END DO
+        !Add the optrate entry
 
-            FORCE(1:nd) = FORCE(1:nd) + Weight * (F + C*Ext) * Basis(1:nd)
-        END DO
-        CALL DefaultUpdateEquations(STIFF,FORCE)
+        oprate=beta*laserpower/(laserdiameter*plank_constant*laser_frequency)
+
+        CALL ListAddConstReal(BC, 'optrate', oprate)
+
     !------------------------------------------------------------------------------
-    END SUBROUTINE LocalMatrixBC
+    END SUBROUTINE CalcLaserPowerBC
     !------------------------------------------------------------------------------
 
     !------------------------------------------------------------------------------
+
+    !-----------------------------------------------------------------------------
+    !    SUBROUTINE SetInitialOptRate(Model,beta)
+    !    !-----------------------------------------------------------------------------
+    !        USE defutils
+    !        IMPLICIT NONE
+    !        TYPE(Model_t) :: Model
+    !        TYPE(Value_List_t), POINTER :: Constants
+    !        REAL(KIND=dp) :: beta
+    !    !---------------------------------------------------------------------------
+    !        REAL(KIND=dp) :: laser_power, laser_spot_size, opt_rate_initial
+    !    !---------------------------------------------------------------------------
+    !
+    !
+    !
+    !    END SUBROUTINE SetInitialOptRate
 
 
     !------------------------------------------------------------------------------
@@ -741,6 +764,7 @@ CONTAINS
     !    END FUNCTION GetAlkaliConcentration
 
 
+
 !------------------------------------------------------------------------------
 END SUBROUTINE OPSolver
 !------------------------------------------------------------------------------
@@ -854,8 +878,8 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
         !Check to make sure we actually found the solution
 
 
-        IF (Pressure .EQ. 0) Call Fatal('GetSpinDestructionRate',&
-            'Pressure variable not found. Check name of N-S variable.')
+        !        IF (Pressure .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+        !            'Pressure variable not found. Check name of N-S variable.')
 
 
         !Get the gas fractions
@@ -920,6 +944,20 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
 
 END FUNCTION CalculateSpinDestructionRate
 
+FUNCTION CalculateRbPol(Model,n,Argument) RESULT(RbPol)
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument(2)
+    REAL(KIND=dp) :: spindestrucionrate, optrate
+    REAL(KIND=dp) :: RbPol
+    !--------------------------------------------------------------------------------
+
+    RbPol=optrate/(optrate+spindestrucionrate)
+
+END FUNCTION CalculateRbPol
+
 SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
     !------------------------------------------------------------------------------
     USE DefUtils
@@ -946,3 +984,401 @@ SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
 
 !-------------------------------------------------------------------------
 END SUBROUTINE FoundCheck
+
+
+!--------------------------------------------------------------
+!From here down will need to moved to the eventual new XePol Solver
+FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
+    RESULT(SpinExchangeRate)
+
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument
+    REAL(KIND=dp) :: Concentration
+    REAL(KIND=dp) :: SpinExchangeRate
+    REAL(KIND=dp) :: binaryexchangerate
+    TYPE(ValueList_t), POINTER :: Materials
+    LOGICAL :: found
+    !-----------------------------------------------------------
+
+    !Eventaully I might import more terms, so this is anticpating that eventuallity
+    Concentration=Argument
+
+    Materials=GetMaterial()
+
+    binaryexchangerate=GetConstReal(Materials, 'binary exchange rate', found)
+    CALL FoundCheck(found, 'binaryexchangerate', 'fatal')
+
+    SpinExchangeRate=binaryexchangerate*Concentration
+
+END FUNCTION CalculateSpinExchangeRate
+
+FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
+    RESULT(SpinRelaxationRate)
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument(2)
+    REAL(KIND=dp) :: Pressure,Temperature
+    REAL(KIND=dp) :: he_fraction=0, xe_fraction=0, n2_fraction=0
+    REAL(KIND=dp) :: SpinRelaxationRate
+    REAL(kind=dp) :: binary_term=0, vdWterm=0
+    TYPE(ValueList_t), POINTER :: Materials
+    LOGICAL :: found
+    !------------------------------------------------------------------------------
+
+    Materials=>GetMaterial()
+
+    Pressure=Argument(1)
+    Temperature=Argument(2)
+
+    xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+    CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+    n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+    CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+    he_fraction = GetConstReal(Materials, 'he fraction', found)
+    CALL FoundCheck(found, 'he fraction', 'fatal')
+
+    binary_term=(5D-6)*xe_fraction*((Pressure)/101325)*(273.15/Temperature)
+
+    vdWterm=6.72D-5*(1/(1+0.25*he_fraction/xe_fraction+1.05*n2_fraction/xe_fraction))
+
+    SpinRelaxationRate=binary_term+vdWterm
+
+END FUNCTION CalculateSpinRelaxationRate
+
+REAL(KIND=selected_real_kind(12)) FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
+    !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
+    !I need to go back and document this better (probably when I revamp the XePol
+    !solver.
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument(2)
+    !REAL(KIND=dp) :: D_Xe
+    !-------------------------------------------------------
+    REAL(KIND=dp) :: Pressure,Temperature
+    REAL(KIND=dp) :: pressure_atm=0
+
+    REAL(KIND=dp) :: mixKesp=0, tprime=0, omega=0, sigma=0, Mtot=0
+    !------------------------------------------------------------
+    !I believe these are all gotten from Lightfoot, sans the masses
+    REAL(Kind=dp), PARAMETER :: A=1.858D-7, sigmaHe=2.576, sigmaXe=4.009,&
+        KespHe=10.02, KespXe=234.7, massXe=131.29, massHe=4.003
+
+    !------------------------------------------------------------
+
+    !Getting assignments
+    Pressure=Argument(1)
+    Temperature=Argument(2)
+
+    !Convert to atm
+    pressure_atm=(Pressure)/101325
+
+    !Actually doing the calcuation.
+    mixKesp=sqrt(KespHe*KespXe)
+    tprime = Temperature/mixKesp
+
+    omega = (1.06036/tprime**(0.15610))+(0.19300/exp(0.47635*tprime))+&
+        (1.03587/exp(1.52296*tprime))+(1.76474/exp(3.89411*tprime))
+
+    sigma = 0.5*(sigmaHe+sigmaXe)
+
+    Mtot = sqrt(1/massHe+1/massXe)
+
+    D_Xe = (A*Temperature**(3/2)*Mtot)/(pressure_atm*omega*sigma**2)
+
+
+
+END FUNCTION CalculateXenonDiffusion
+
+FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
+
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: argument(2)
+    REAL(KIND=dp) :: pressure, temperature
+    REAL(KIND=dp) :: decayrate
+    !--------------------------------------------
+    REAL(KIND=dp) :: cell_radius=0, cellT1=0,&
+        pressureT1=0, temperatureT1=0, T1vals(2)
+    REAL(KIND=SELECTED_REAL_KIND(12)) :: initialD_Xe=0, CalculateXenonDiffusion
+
+    TYPE(ValueList_t), POINTER :: Constants
+
+    LOGICAL :: found, check
+    !------------------------------------------------------------
+
+    Constants=>GetConstants()
+
+    cell_radius=GetConstReal(Constants, 'cell radius', found)
+    CALL FoundCheck(found, 'cell radius', 'fatal')
+
+    cellT1=GetConstReal(Constants, 'T1', found)
+    CALL FoundCheck(found, 'T1', 'fatal')
+
+    pressureT1=GetConstReal(Constants, 'T1 Pressure',found)
+    CALL FoundCheck(found, 'T1 Pressure', 'fatal')
+
+    temperatureT1=GetConstReal(Constants, 'T1 Temperature', found)
+    CALL FoundCheck(found, 'T1 Temperature', 'fatal')
+
+    T1vals = (/pressureT1,temperatureT1/)
+
+    initialD_Xe=CalculateXenonDiffusion(Model, 1, T1vals)
+
+    check = (cellT1>cell_radius**2/(2*initialD_Xe))
+
+    IF (check) THEN
+
+        decayrate=(initialD_Xe/cell_radius)*(1+(cell_radius/sqrt(initialD_Xe*cellT1*60))/&
+            tan(cell_radius/sqrt(initialD_Xe*cellT1*60)))
+
+    ELSE
+
+        CALL Fatal('CalculateDecayRate',&
+            'The cell T1 is shorter that what is possible given the cell radius')
+
+    END IF
+
+END FUNCTION CalculateDecayRate
+
+
+FUNCTION CalculateXeGamma(Model,n,argument)&
+    RESULT(XeGamma)
+
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: argument(3)
+    REAL(KIND=dp) :: concentration,pressure,temperature
+    REAL(KIND=dp) :: spinexchangerate
+    REAL(KIND=dp) :: binaryexchangerate
+    !-------------------------------------------------------
+    REAL(KIND=dp) :: he_fraction=0, xe_fraction=0, n2_fraction=0
+    REAL(KIND=dp) :: spinrelaxationrate
+    REAL(kind=dp) :: binary_term=0, vdWterm=0
+    !----------------------------------------------------------
+    REAL(KIND=dp) :: XeGamma
+    !-------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials
+    LOGICAL :: found
+    !-----------------------------------------------------------
+
+    !----Spin Exchange Rate-------------------------------------------------------
+
+    !Eventaully I might import more terms, so this is anticpating that eventuallity
+    concentration=argument(1)
+
+    Materials=GetMaterial()
+
+    binaryexchangerate=GetConstReal(Materials, 'binary exchange rate', found)
+    CALL FoundCheck(found, 'binaryexchangerate', 'fatal')
+
+    spinexchangerate=binaryexchangerate*Concentration
+
+    !------------------------------------------------------------------------------
+
+    !-------------------Spin Relaxation Rate--------------------------------------
+    pressure=argument(2)
+    temperature=argument(3)
+
+    xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+    CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+    n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+    CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+    he_fraction = GetConstReal(Materials, 'he fraction', found)
+    CALL FoundCheck(found, 'he fraction', 'fatal')
+
+    binary_term=(5D-6)*xe_fraction*((Pressure)/101325)*(273.15/Temperature)
+
+    vdWterm=6.72D-5*(1/(1+0.25*he_fraction/xe_fraction+1.05*n2_fraction/xe_fraction))
+
+    spinrelaxationrate=binary_term+vdWterm
+
+
+    XeGamma=spinexchangerate+spinrelaxationrate
+
+END FUNCTION CalculateXeGamma
+
+FUNCTION CalculateXeField(Model,n,argument)&
+    RESULT(XeField)
+
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: argument(4)
+    !-------------------------------------------------
+    REAL(KIND=dp) :: concentration,pressure,temperature, optrate
+    REAL(KIND=dp) :: alkali_alkali_spin_destruction_rate, xe_spin_destruction_rate
+    REAL(KIND=dp) :: xe_fraction, n2_fraction, he_fraction, xe_pressure,&
+        he_pressure, n2_pressure,tot_pressure_amg, ref_pressure
+    REAL(KIND=dp) :: SpinDestrucionRate
+    !-----------------------------------------------------------------
+    INTEGER :: ind
+    !-----------------------------------------------------------------
+    LOGICAL :: convert_density=.FALSE., he_term_included=.FALSE.
+    LOGICAL :: n2_term_included=.FALSE., vanderWall_term_included=.FALSE.
+    LOGICAL :: xe_term_included=.FALSE., local_temperature_used = .FALSE.
+    LOGICAL :: local_pressure_used = .FALSE., found=.FALSE.
+    !-----------------------------------------------------------
+    REAL(KIND=dp) :: SpinExchangeRate
+    REAL(KIND=dp) :: binaryexchangerate
+    !----------------------------------------------------------
+    REAL(KIND=dp) :: XeField
+    !--------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials
+    !--------------------------------------------------------------
+
+    !Spin Destruction Rate Calculation
+
+    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
+
+    SpinDestrucionRate = 0.0D0
+
+    Materials => GetMaterial()
+
+    !!!!!!!!!!!!!!!!!!!Alkali-Alkali Spin Destruction Term!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    alkali_alkali_spin_destruction_rate=&
+        GetConstReal(Materials, 'alkali-alkali spin destruction rate', found)
+    CALL FoundCheck(found, 'alkali-alkali spin destruction rate','fatal')
+
+    ! Assign the Concentration
+    Concentration=argument(1)
+
+    !Check if we should convert the density (we probably do want to
+    convert_density=GetLogical(Materials, 'convert density', found)
+    CALL FoundCheck(found, 'convert density', 'warn')
+
+    !Convert the alkali density to particles/m^3
+    IF (convert_density) THEN
+        Concentration = rb_density_conversion_factor*Concentration
+    END IF
+
+    SpinDestrucionRate=alkali_alkali_spin_destruction_rate*Concentration
+
+    !Inclusion of other terms in the spin-destruction rate: He-Rb, N2-Rb,
+    !and Van der Walls terms
+
+    he_term_included=GetLogical(Materials,&
+        'Helium Spin Destruction Term Included',found)
+
+    n2_term_included = GetLogical(Materials,&
+        'Nitrogen Spin Destruction Term Included',found)
+
+    xe_term_included = GetLogical(Materials,&
+        'Xenon Spin Destruction Term Included',found)
+
+    vanderWall_term_included = GetLogical(Materials,&
+        'vander Wall Spin Destruction Term Included',found)
+
+    IF (he_term_included .OR. n2_term_included .OR. &
+        xe_term_included .OR. vanderWall_term_included) THEN
+
+        !Get the temperature
+
+        Temperature = argument(2)
+
+        IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+            'Temperature variable not found.')
+
+
+        !Get the pressure
+
+        Pressure = argument(3)
+
+        !Check to make sure we actually found the solution
+
+
+        !        IF (Pressure .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+        !            'Pressure variable not found. Check name of N-S variable.')
+
+
+        !Get the gas fractions
+        xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+        CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+        n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+        CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+        he_fraction = GetConstReal(Materials, 'he fraction', found)
+        CALL FoundCheck(found, 'he fraction', 'fatal')
+
+
+        !Call fatal if the gas fractions don't add to 1
+
+        IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
+            CALL Fatal('GetSpinDestructionRate', &
+                'Gas fractions do not add to 1')
+        END IF
+
+        !Calculate pressure in amagats
+
+        tot_pressure_amg = ((Pressure)/101325)*(273.15/Temperature)
+
+        xe_pressure=tot_pressure_amg*xe_fraction
+
+        n2_pressure=tot_pressure_amg*n2_fraction
+
+        he_pressure=tot_pressure_amg*he_fraction
+
+        !Implement the xenon contribution to spin destruction rate
+        IF (xe_term_included) THEN
+
+            xe_spin_destruction_rate = 0.0D0
+            xe_spin_destruction_rate = GetConstReal(Materials,&
+                'xe spin destruction rate',found)
+            CALL FoundCheck(found, 'xe spin destruction rate', 'fatal')
+
+            SpinDestrucionRate= SpinDestrucionRate+&
+                xe_spin_destruction_rate*xe_pressure
+
+        END IF
+
+        !Implement helium contribution to spin destruction rate
+        IF (he_term_included) THEN
+            SpinDestrucionRate = SpinDestrucionRate+&
+                24.6*(1+(Temperature+273.15-90)/94.6)*he_pressure
+        END IF
+
+        !Implement N2 contribution to spin destruction rate
+        IF (n2_term_included) THEN
+            SpinDestrucionRate=SpinDestrucionRate+&
+                170*(1+(Temperature+273.15-90)/194.36)*n2_pressure
+        END IF
+
+        !Implement van der Walls contribution to spin destruction rate
+        IF (vanderWall_term_included) THEN
+            SpinDestrucionRate=SpinDestrucionRate+&
+                6469/(xe_fraction+1.1*n2_fraction+3.2*he_fraction)
+        END IF
+    END IF
+
+    !-------------Spin Exchange Rate---------------------------------
+
+
+    !Eventaully I might import more terms, so this is anticpating that eventuallity
+
+    binaryexchangerate=GetConstReal(Materials, 'binary exchange rate', found)
+    CALL FoundCheck(found, 'binaryexchangerate', 'fatal')
+
+    SpinExchangeRate=binaryexchangerate*Concentration
+
+    optrate=argument(4)
+
+    XeField=SpinExchangeRate*(optrate/(SpinDestrucionRate+optrate))
+
+END FUNCTION CalculateXeField
