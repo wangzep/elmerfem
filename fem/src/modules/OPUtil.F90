@@ -1,336 +1,358 @@
 MODULE OPUtil
 
-!    INTERFACE BetaCalc
-!        FUNCTION BetaCalc (Element , n) RESULT(Beta)
-!            TYPE(Element_t),POINTER, INTENT (IN) :: Element
-!            REAL(KIND=dp), INTENT(IN) :: n
-!            REAL(KIND=dp), INTENT(OUT) :: Beta
-!        END FUNCTION BetaCalc
-!    END INTERFACE
+
+    IMPLICIT NONE
 
 
-!    FUNCTION BetaCalc(Element, n) RESULT(Beta)
-!        USE DefUtils
-!        IMPLICIT NONE
-!        TYPE(Model_t) :: Model
-!        INTEGER :: n
-!
-!        !------------------------------------------------------------------------!
-!        REAL(KIND=dp) :: TWO, C, LOG2
-!        REAL(KIND=dp) :: electron_radius, oscillator_strength, laser_wavelength, &
-!            laser_linewidth, frequency_shift,&
-!            absorb_laser_ratio,laser_frequency,&
-!            rubidium_frequency, laser_freq_width,&
-!            rubidium_freq_width, rubidium_wavelength,w_prime, w_dprime,&
-!            w_input_real,w_input_imaginary, Beta, power, area, initopt, h, x(3),&
-!            pir
-!        LOGICAL :: FLAG, Found
-!        !------------------------------------------------------------------------!
-!        !Declare constants-------------------------------------------------------
-!        TWO = 2.0D0
-!        C = 299792458.0D0 !speed of light in m/s
-!        LOG2 = LOG(TWO)
-!        electron_radius = 2.8179403267e-15 !electron radius in m
-!        h = 6.62607004D-34
-!        pir=4.D0*DATAN(1.D0)
-!        !-------------------------------------------------------------------------
-!
-!        !Get the information about the rubidium and the laser from the SIF
-!        !file---------------------------------------------------------------------
-!
-!
-!        rubidium_wavelength = GetConstReal(Model % Constants,'rubidium wavelength',Found)
-!        laser_wavelength = GetConstReal(Model % Constants,'laser wavelength',Found)
-!        laser_linewidth = GetConstReal(Model % Constants,'laser line width',Found)
-!        rubidium_freq_width = GetConstReal(Model % Constants,'rubidium frequency width',Found)
-!        oscillator_strength = GetConstReal(Model % Constants,'oscillator strength', Found)
-!        power = GetConstReal(Model % Constants, 'laser power', Found)
-!        area = GetConstReal(Model % Constants, 'laser area', Found)
-!
-!            !For testing---------------------------------!!!!!!!!!!!!!!!!!!!!!!!
-!        !rubidium_wavelength = 800e-9
-!        !rubidium_freq_width = 126.65e9
-!
-!        !laser_wavelength = 800e-9
-!        !laser_linewidth = 2e-9
-!
-!        !oscillator_strength = 1.0/3.0
-!
-!
-!        !-------------------------------------------------------------------------
-!
-!        !Define spectral overlap function (eq. A7, A10 of Fink's paper)
-!        rubidium_frequency = C/rubidium_wavelength
-!
-!        !The second equation here uses the dispresion relationship
-!        laser_frequency = C/laser_wavelength
-!
-!        laser_freq_width = (C*laser_linewidth)/(laser_wavelength)**2
-!
-!
-!        absorb_laser_ratio = rubidium_freq_width/laser_freq_width
-!
-!        frequency_shift = 2*(laser_frequency - rubidium_frequency)/laser_freq_width
-!
-!        !So... A8 is the Faddeeva function written in a funny way. Note, that in order to recover
-!        !The Faddeeva function normally, we need to divide the arguement of erfc in A8 by -i.
-!        !When you do that you get that the real part is -sqrt(ln(2))*s and the imaginary part
-!        !is sqrt(ln(2))*r. This is very confusing, and I'm going to make a note in my lab note-
-!        !book regarding the maninpulation.
-!
-!        !So I don't think the below assignments are wrong!
-!        w_input_real = -SQRT(LOG2)*(frequency_shift)
-!        w_input_imaginary = SQRT(LOG2)*(absorb_laser_ratio)
-!
-!
-!        CALL WOFZ(w_input_real,w_input_imaginary,w_prime,w_dprime,FLAG)
-!
-!        !print *,'wprime',w_prime
-!
-!        Beta = 2*DSQRT(PI*LOG2)*(electron_radius*oscillator_strength*&
-!            laser_wavelength**2*w_prime)/laser_linewidth
-!        !PRINT *,'Beta is', Beta
-!        !I added a cos term to assure that the laser optical pumping rate goes to zero at the boundaries
-!        !of the laser beam area. I was getting some computational artifacts that appeared to be due to the
-!        !discontinity at the border.
-!        !The factor of 3.14/2 is to account for the difference in area under the curve of a cos and a Heaviside
-!        !function.
-!        initopt = 3.14/2*Beta*power/(area*h*laser_frequency)*COS((3.14**(3/2)*SQRT(x(1)**2 + x(2)**2))/(SQRT(area)))
-!
-!
-!        !Regualr initopt expression (used for testing)
-!        !initopt = Beta*power/(area*h*laser_frequency)
-!        !PRINT *,'Power is', power
-!        !PRINT *,'Area is', area
-!        !PRINT *,'h is', h
-!        !PRINT *,'Laser Frequency is', laser_frequency
-!        !PRINT *,'Initial Optical Pumprate is', initopt
-!
-!        RETURN
-!
-!    END FUNCTION
-!
-!    !We need the FADDEEVA function from equation (A8). Thankfully, someone in the
-!    !interweb has coded a nice function to calculate it for me. The ACM has collected
-!    !aligorithms to do this very thing. The following code is copied line for line
-!    !from ALGORITHM 680, COLLECTED ALGORITHMS FROM ACM.
-!    !THIS WORK PUBLISHED IN TRANSACTIONS ON MATHEMATICAL SOFTWARE,
-!    !VOL. 16, NO. 1, PP. 47. - http://www.netlib.org/toms/68
-!
-!    !      ALGORITHM 680, COLLECTED ALGORITHMS FROM ACM.
-!    !      THIS WORK PUBLISHED IN TRANSACTIONS ON MATHEMATICAL SOFTWARE,
-!    !      VOL. 16, NO. 1, PP. 47.
-!    SUBROUTINE WOFZ (XI, YI, U, V, FLAG)
-!        !
-!        !  GIVEN A COMPLEX NUMBER Z = (XI,YI), THIS SUBROUTINE COMPUTES
-!        !  THE VALUE OF THE FADDEEVA-FUNCTION W(Z) = EXP(-Z**2)*ERFC(-I*Z),
-!        !  WHERE ERFC IS THE COMPLEX COMPLEMENTARY ERROR-FUNCTION AND I
-!        !  MEANS SQRT(-1).
-!        !  THE ACCURACY OF THE ALGORITHM FOR Z IN THE 1ST AND 2ND QUADRANT
-!        !  IS 14 SIGNIFICANT DIGITS; IN THE 3RD AND 4TH IT IS 13 SIGNIFICANT
-!        !  DIGITS OUTSIDE A CIRCULAR REGION WITH RADIUS 0.126 AROUND A ZERO
-!        !  OF THE FUNCTION.
-!        !  ALL REAL VARIABLES IN THE PROGRAM ARE DOUBLE PRECISION.
-!        !
-!        !
-!        !  THE CODE CONTAINS A FEW COMPILER-DEPENDENT PARAMETERS :
-!        !     RMAXREAL = THE MAXIMUM VALUE OF RMAXREAL EQUALS THE ROOT OF
-!        !                RMAX = THE LARGEST NUMBER WHICH CAN STILL BE
-!        !                IMPLEMENTED ON THE COMPUTER IN DOUBLE PRECISION
-!        !                FLOATING-POINT ARITHMETIC
-!        !     RMAXEXP  = LN(RMAX) - LN(2)
-!        !     RMAXGONI = THE LARGEST POSSIBLE ARGUMENT OF A DOUBLE PRECISION
-!        !                GONIOMETRIC FUNCTION (DCOS, DSIN, ...)
-!        !  THE REASON WHY THESE PARAMETERS ARE NEEDED AS THEY ARE DEFINED WILL
-!        !  BE EXPLAINED IN THE CODE BY MEANS OF COMMENTS
-!        !
-!        !
-!        !  PARAMETER LIST
-!        !     XI     = REAL      PART OF Z
-!        !     YI     = IMAGINARY PART OF Z
-!        !     U      = REAL      PART OF W(Z)
-!        !     V      = IMAGINARY PART OF W(Z)
-!        !     FLAG   = AN ERROR FLAG INDICATING WHETHER OVERFLOW WILL
-!        !              OCCUR OR NOT; TYPE LOGICAL;
-!        !              THE VALUES OF THIS VARIABLE HAVE THE FOLLOWING
-!        !              MEANING :
-!        !              FLAG=.FALSE. : NO ERROR CONDITION
-!        !              FLAG=.TRUE.  : OVERFLOW WILL OCCUR, THE ROUTINE
-!        !                             BECOMES INACTIVE
-!        !  XI, YI      ARE THE INPUT-PARAMETERS
-!        !  U, V, FLAG  ARE THE OUTPUT-PARAMETERS
-!        !
-!        !  FURTHERMORE THE PARAMETER FACTOR EQUALS 2/SQRT(PI)
-!        !
-!        !  THE ROUTINE IS NOT UNDERFLOW-PROTECTED BUT ANY VARIABLE CAN BE
-!        !  PUT TO 0 UPON UNDERFLOW;
-!        !
-!        !  REFERENCE - GPM POPPE, CMJ WIJERS; MORE EFFICIENT COMPUTATION OF
-!        !  THE COMPLEX ERROR-FUNCTION, ACM TRANS. MATH. SOFTWARE.
-!        !
-!
-!
-!        USE DefUtils
-!
-!        IMPLICIT REAL(KIND=dp) (A-H, O-Z)
-!
-!        !DOUBLE PRECISION FACTOR,RMAMXREAL,RMAXEXP,RMAXGONI
-!
-!        LOGICAL A, B, FLAG
-!        PARAMETER (FACTOR   = 1.12837916709551257388D0,&
-!            RMAXREAL = 0.5D+154,&
-!            RMAXEXP  = 708.50306146160D0,&
-!            RMAXGONI = 3.53711887601422D+15)
-!
-!        FLAG = .FALSE.
-!
-!        XABS = DABS(XI)
-!        YABS = DABS(YI)
-!        X    = XABS/6.3
-!        Y    = YABS/4.4
-!
-!        !
-!        !     THE FOLLOWING IF-STATEMENT PROTECTS
-!        !     QRHO = (X**2 + Y**2) AGAINST OVERFLOW
-!        !
-!        IF ((XABS.GT.RMAXREAL).OR.(YABS.GT.RMAXREAL)) GOTO 100
-!
-!        QRHO = X**2 + Y**2
-!
-!        XABSQ = XABS**2
-!        XQUAD = XABSQ - YABS**2
-!        YQUAD = 2*XABS*YABS
-!
-!        A     = QRHO.LT.0.085264D0
-!
-!        IF (A) THEN
-!            !
-!            !  IF (QRHO.LT.0.085264D0) THEN THE FADDEEVA-FUNCTION IS EVALUATED
-!            !  USING A POWER-SERIES (ABRAMOWITZ/STEGUN, EQUATION (7.1.5), P.297)
-!            !  N IS THE MINIMUM NUMBER OF TERMS NEEDED TO OBTAIN THE REQUIRED
-!            !  ACCURACY
-!            !
-!            QRHO  = (1-0.85*Y)*DSQRT(QRHO)
-!            N     = IDNINT(6 + 72*QRHO)
-!            J     = 2*N+1
-!            XSUM  = 1.0/J
-!            YSUM  = 0.0D0
-!            DO 10 I=N, 1, -1
-!                J    = J - 2
-!                XAUX = (XSUM*XQUAD - YSUM*YQUAD)/I
-!                YSUM = (XSUM*YQUAD + YSUM*XQUAD)/I
-!                XSUM = XAUX + 1.0/J
-!10          CONTINUE
-!            U1   = -FACTOR*(XSUM*YABS + YSUM*XABS) + 1.0
-!            V1   =  FACTOR*(XSUM*XABS - YSUM*YABS)
-!            DAUX =  DEXP(-XQUAD)
-!            U2   =  DAUX*DCOS(YQUAD)
-!            V2   = -DAUX*DSIN(YQUAD)
-!
-!            U    = U1*U2 - V1*V2
-!            V    = U1*V2 + V1*U2
-!
-!        ELSE
-!            !
-!            !  IF (QRHO.GT.1.O) THEN W(Z) IS EVALUATED USING THE LAPLACE
-!            !  CONTINUED FRACTION
-!            !  NU IS THE MINIMUM NUMBER OF TERMS NEEDED TO OBTAIN THE REQUIRED
-!            !  ACCURACY
-!            !
-!            !  IF ((QRHO.GT.0.085264D0).AND.(QRHO.LT.1.0)) THEN W(Z) IS EVALUATED
-!            !  BY A TRUNCATED TAYLOR EXPANSION, WHERE THE LAPLACE CONTINUED FRACTION
-!            !  IS USED TO CALCULATE THE DERIVATIVES OF W(Z)
-!            !  KAPN IS THE MINIMUM NUMBER OF TERMS IN THE TAYLOR EXPANSION NEEDED
-!            !  TO OBTAIN THE REQUIRED ACCURACY
-!            !  NU IS THE MINIMUM NUMBER OF TERMS OF THE CONTINUED FRACTION NEEDED
-!            !  TO CALCULATE THE DERIVATIVES WITH THE REQUIRED ACCURACY
-!            !
-!
-!            IF (QRHO.GT.1.0) THEN
-!                H    = 0.0D0
-!                KAPN = 0
-!                QRHO = DSQRT(QRHO)
-!                NU   = IDINT(3 + (1442/(26*QRHO+77)))
-!            ELSE
-!                QRHO = (1-Y)*DSQRT(1-QRHO)
-!                H    = 1.88*QRHO
-!                H2   = 2*H
-!                KAPN = IDNINT(7  + 34*QRHO)
-!                NU   = IDNINT(16 + 26*QRHO)
-!            ENDIF
-!
-!            B = (H.GT.0.0)
-!
-!            IF (B) QLAMBDA = H2**KAPN
-!
-!            RX = 0.0
-!            RY = 0.0
-!            SX = 0.0
-!            SY = 0.0
-!
-!            DO 11 N=NU, 0, -1
-!                NP1 = N + 1
-!                TX  = YABS + H + NP1*RX
-!                TY  = XABS - NP1*RY
-!                C   = 0.5/(TX**2 + TY**2)
-!                RX  = C*TX
-!                RY  = C*TY
-!                IF ((B).AND.(N.LE.KAPN)) THEN
-!                    TX = QLAMBDA + SX
-!                    SX = RX*TX - RY*SY
-!                    SY = RY*TX + RX*SY
-!                    QLAMBDA = QLAMBDA/H2
-!                ENDIF
-!11          CONTINUE
-!
-!            IF (H.EQ.0.0) THEN
-!                U = FACTOR*RX
-!                V = FACTOR*RY
-!            ELSE
-!                U = FACTOR*SX
-!                V = FACTOR*SY
-!            END IF
-!
-!            IF (YABS.EQ.0.0) U = DEXP(-XABS**2)
-!
-!        END IF
-!
-!
-!        !
-!        !  EVALUATION OF W(Z) IN THE OTHER QUADRANTS
-!        !
-!
-!        IF (YI.LT.0.0) THEN
-!
-!            IF (A) THEN
-!                U2    = 2*U2
-!                V2    = 2*V2
-!            ELSE
-!                XQUAD =  -XQUAD
-!
-!                !
-!                !         THE FOLLOWING IF-STATEMENT PROTECTS 2*EXP(-Z**2)
-!                !         AGAINST OVERFLOW
-!                !
-!                IF ((YQUAD.GT.RMAXGONI).OR.&
-!                    (XQUAD.GT.RMAXEXP)) GOTO 100
-!
-!                W1 =  2*DEXP(XQUAD)
-!                U2  =  W1*DCOS(YQUAD)
-!                V2  = -W1*DSIN(YQUAD)
-!            END IF
-!
-!            U = U2 - U
-!            V = V2 - V
-!            IF (XI.GT.0.0) V = -V
-!        ELSE
-!            IF (XI.LT.0.0) V = -V
-!        END IF
-!
-!        RETURN
-!
-!100     FLAG = .TRUE.
-!        RETURN
-!
-!    END
-END
+    INTERFACE
+
+        FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
+            RESULT(SpinExchangeRate)
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: Model
+            INTEGER :: n
+            REAL(KIND=dp) :: Argument(3)
+            REAL(KIND=dp) :: SpinExchangeRate
+        END
+
+        FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
+            RESULT(SpinRelaxationRate)
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: Model
+            INTEGER :: n
+            REAL(KIND=dp) :: Argument(2)
+            REAL(KIND=dp) :: SpinRelaxationRate
+        END
+
+        FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: Model
+            INTEGER :: n
+            REAL(KIND=dp) :: argument(2)
+            REAL(KIND=dp) :: decayrate
+        END
+
+        FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: Model
+            INTEGER :: n
+            REAL(KIND=dp) :: Argument(2)
+            REAL(KIND=dp) :: D_Xe
+        END
+
+        FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: model
+            INTEGER :: n
+            REAL(KIND=dp) :: Temp
+            REAL(KIND=dp) :: RbNumDensity_m
+        END
+
+        SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
+            !------------------------------------------------------------------------------
+            USE DefUtils
+
+            IMPLICIT NONE
+
+            LOGICAL, INTENT(IN) :: found
+            CHARACTER(len=*), INTENT(IN) :: name
+            CHARACTER(len=*), INTENT(IN) :: warn_fatal_flag
+        END
+
+
+
+    END INTERFACE
+END MODULE
+
+FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
+    RESULT(SpinExchangeRate)
+
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument(3)
+    REAL(KIND=dp) :: Concentration, Temperature, Pressure
+    REAL(KIND=dp) :: SpinExchangeRate
+    REAL(KIND=dp) :: binaryexchangerate, xemolcrate, n2molcrate, hemolcrate
+    REAL(KIND=dp) :: xe_fraction,n2_fraction, he_fraction, loschmidt,&
+        tot_numberdensity, xe_numberdensity, n2_numberdensity, he_numberdensity
+    TYPE(ValueList_t), POINTER :: Materials, Constants
+    LOGICAL :: found
+    !-----------------------------------------------------------
+
+    !Eventaully I might import more terms, so this is anticpating that eventuallity
+    Concentration=Argument(1)
+
+    Temperature=Argument(2)
+
+
+    IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+        'Temperature variable not found.')
+
+    Pressure=Argument(3)
+
+    Constants=>GetConstants()
+    Materials=>GetMaterial()
+
+
+    !Binary component
+    binaryexchangerate=GetConstReal(Materials, 'binary exchange rate', found)
+    CALL FoundCheck(found, 'binaryexchangerate', 'fatal')
+
+    SpinExchangeRate=binaryexchangerate*Concentration
+
+
+    !Molecular component
+
+    !Get the gas fractions
+    xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+    CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+    n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+    CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+    he_fraction = GetConstReal(Materials, 'he fraction', found)
+    CALL FoundCheck(found, 'he fraction', 'fatal')
+
+
+    !Call fatal if the gas fractions don't add to 1
+
+    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
+        CALL Fatal('GetSpinDestructionRate', &
+            'Gas fractions do not add to 1')
+    END IF
+
+    !Calculate pressure in amagats
+
+    !Get Loschmidt's number if defined in constants
+
+        loschmidt=GetConstReal(Model % Constants, 'loschmidts constant', found)
+        CALL FoundCheck(found, 'loschmidts constant' , 'warn')
+        IF (.NOT. found) THEN
+            loschmidt= 2.6867811D25
+        END IF
+
+
+
+    tot_numberdensity = ((Pressure)/101325)*(273.15/Temperature)*loschmidt
+
+    xe_numberdensity=tot_numberdensity*xe_fraction
+
+    n2_numberdensity=tot_numberdensity*n2_fraction
+
+    he_numberdensity=tot_numberdensity*he_fraction
+
+    !Get molecular exchange rates
+
+    xemolcrate=GetConstReal(Materials, 'xe molecular se rate', found)
+    CALL FoundCheck(found, 'xe molecular se rate', 'fatal')
+
+    hemolcrate=GetConstReal(Materials, 'he molecular se rate', found)
+    CALL FoundCheck(found, 'xe molecular se rate', 'fatal')
+
+    n2molcrate=GetConstReal(Materials, 'n2 molecular se rate', found)
+    CALL FoundCheck(found, 'xe molecular se rate', 'fatal')
+
+
+    SpinExchangeRate=SpinExchangeRate+(1/(xe_numberdensity/xemolcrate&
+        +he_numberdensity/hemolcrate+n2_numberdensity/n2molcrate))*Concentration
+
+END FUNCTION CalculateSpinExchangeRate
+
+FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
+    RESULT(SpinRelaxationRate)
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument(2)
+    REAL(KIND=dp) :: Pressure,Temperature
+    REAL(KIND=dp) :: he_fraction=0, xe_fraction=0, n2_fraction=0
+    REAL(KIND=dp) :: SpinRelaxationRate
+    REAL(kind=dp) :: binary_term=0, vdWterm=0
+    TYPE(ValueList_t), POINTER :: Materials
+    LOGICAL :: found
+    !------------------------------------------------------------------------------
+
+    Materials=>GetMaterial()
+
+    Pressure=Argument(1)
+    Temperature=Argument(2)
+
+    xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+    CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+    n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+    CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+    he_fraction = GetConstReal(Materials, 'he fraction', found)
+    CALL FoundCheck(found, 'he fraction', 'fatal')
+
+    binary_term=(5D-6)*xe_fraction*((Pressure)/101325)*(273.15/Temperature)
+
+    vdWterm=6.72D-5*(1/(1+0.25*he_fraction/xe_fraction+1.05*n2_fraction/xe_fraction))
+
+    SpinRelaxationRate=binary_term+vdWterm
+
+END FUNCTION CalculateSpinRelaxationRate
+
+FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
+    !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
+    !I need to go back and document this better (probably when I revamp the XePol
+    !solver.
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument(2)
+    REAL(KIND=dp) :: D_Xe
+    !-------------------------------------------------------
+    REAL(KIND=dp) :: Pressure,Temperature
+    REAL(KIND=dp) :: pressure_atm=0
+
+    REAL(KIND=dp) :: mixKesp=0, tprime=0, omega=0, sigma=0, Mtot=0
+    !------------------------------------------------------------
+    !I believe these are all gotten from Lightfoot, sans the masses
+    REAL(Kind=dp), PARAMETER :: A=1.858D-7, sigmaHe=2.576, sigmaXe=4.009,&
+        KespHe=10.02, KespXe=234.7, massXe=131.29, massHe=4.003
+
+    !------------------------------------------------------------
+
+    !Getting assignments
+    Pressure=Argument(1)
+    Temperature=Argument(2)
+
+    !Convert to atm
+    pressure_atm=(Pressure)/101325
+
+    !Actually doing the calcuation.
+    mixKesp=sqrt(KespHe*KespXe)
+    tprime = Temperature/mixKesp
+
+    omega = (1.06036/tprime**(0.15610))+(0.19300/exp(0.47635*tprime))+&
+        (1.03587/exp(1.52296*tprime))+(1.76474/exp(3.89411*tprime))
+
+    sigma = 0.5*(sigmaHe+sigmaXe)
+
+    Mtot = sqrt(1/massHe+1/massXe)
+
+    D_Xe = (A*Temperature**(3/2)*Mtot)/(pressure_atm*omega*sigma**2)
+
+
+
+END FUNCTION CalculateXenonDiffusion
+
+FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
+
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: argument(2)
+    REAL(KIND=dp) :: pressure, temperature
+    REAL(KIND=dp) :: decayrate
+    !--------------------------------------------
+    REAL(KIND=dp) :: cell_radius=0, cellT1=0,&
+        pressureT1=0, temperatureT1=0, T1vals(2)
+    REAL(KIND=SELECTED_REAL_KIND(12)) :: initialD_Xe=0, CalculateXenonDiffusion
+
+    TYPE(ValueList_t), POINTER :: Constants
+
+    LOGICAL :: found, check
+    !------------------------------------------------------------
+
+    Constants=>GetConstants()
+
+    cell_radius=GetConstReal(Constants, 'cell radius', found)
+    CALL FoundCheck(found, 'cell radius', 'fatal')
+
+    cellT1=GetConstReal(Constants, 'T1', found)
+    CALL FoundCheck(found, 'T1', 'fatal')
+
+    pressureT1=GetConstReal(Constants, 'T1 Pressure',found)
+    CALL FoundCheck(found, 'T1 Pressure', 'fatal')
+
+    temperatureT1=GetConstReal(Constants, 'T1 Temperature', found)
+    CALL FoundCheck(found, 'T1 Temperature', 'fatal')
+
+    T1vals = (/pressureT1,temperatureT1/)
+
+    initialD_Xe=CalculateXenonDiffusion(Model, 1, T1vals)
+
+    check = (cellT1>cell_radius**2/(2*initialD_Xe))
+
+    IF (check) THEN
+
+        decayrate=(1/cell_radius)*(1+(cell_radius/sqrt(initialD_Xe*cellT1))/&
+            tan(cell_radius/sqrt(initialD_Xe*cellT1)))
+
+    ELSE
+
+        CALL Fatal('CalculateDecayRate',&
+            'The cell T1 is shorter that what is possible given the cell radius')
+
+    END IF
+
+END FUNCTION CalculateDecayRate
+
+FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
+    !-------------------------------------------------------------------------
+    !Calculates Rb number density in m^-3 using Killian equation as presented
+    !in Fink et al. 2005.
+    !n_Rb=10^(9.55-4132/T)/kT
+    !where T is the temperature in Kelvin and k is Boltzman's constant.
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: model
+    INTEGER :: n
+    REAL(KIND=dp) :: Temp !Dummy Variable. Not actually used
+    REAL(KIND=dp) :: RbNumDensity_m, Temperature
+    LOGICAL :: found=.FALSE.
+    !------------------------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials
+    !-----------------------------------------------------------------------
+
+    Materials => GetConstants()
+
+    Temperature=GetConstReal(Materials, 'alkali temperature', found)
+    IF (.NOT. found) CALL Fatal('RbNumDensity',&
+        'Temperature not found')
+
+
+    RbNumDensity_m=(10**(9.55-4132/Temperature))/(1.380648521D-23*Temperature)
+
+
+END FUNCTION calculaterbmumdensitym
+
+SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
+    !------------------------------------------------------------------------------
+    USE DefUtils
+
+    IMPLICIT NONE
+
+    LOGICAL, INTENT(IN) :: found
+    CHARACTER(len=*), INTENT(IN) :: name
+    CHARACTER(len=*), INTENT(IN) :: warn_fatal_flag
+    CHARACTER(len=len(name)+28) :: outputstring
+
+    !Putting together the text to be printed with the warning or fatal warning.
+
+    outputstring=TRIM('The parameter '//name//' was not found')
+
+
+    IF (.NOT. found) THEN
+        IF (warn_fatal_flag .EQ. 'warn') THEN
+            CALL Warn('OPUtil', outputstring)
+        ELSE
+            CALL Fatal('OPUtil', outputstring)
+        END IF
+    END IF
+
+!-------------------------------------------------------------------------
+END SUBROUTINE FoundCheck
