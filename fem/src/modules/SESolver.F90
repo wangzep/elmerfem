@@ -38,8 +38,52 @@
 SUBROUTINE SESolver( Model,Solver,dt,TransientSimulation )
     !------------------------------------------------------------------------------
     USE DefUtils
+    USE Adaptive
 
     IMPLICIT NONE
+
+    INTERFACE
+        FUNCTION InsideResidual(Model, Element, Mesh,&
+            Quant, Perm, Fnorm) RESULT( Indicator)
+            !------------------------------------------------------------------------------
+
+            USE Types
+            IMPLICIT NONE
+            TYPE(Model_t) :: Model
+            INTEGER :: Perm(:)
+            REAL(KIND=dp) :: Quant(:), Indicator(2), Fnorm
+            TYPE(Mesh_t), POINTER    :: Mesh
+            TYPE(Element_t), POINTER :: Element
+        END FUNCTION InsideResidual
+
+        FUNCTION EdgeResidual( Model, Edge, Mesh, Quant, Perm ) RESULT( Indicator )
+            !------------------------------------------------------------------------------
+            USE Types
+
+            IMPLICIT NONE
+
+            TYPE(Model_t) :: Model
+            INTEGER :: Perm(:)
+            REAL(KIND=dp) :: Quant(:), Indicator(2)
+            TYPE( Mesh_t ), POINTER    :: Mesh
+            TYPE( Element_t ), POINTER :: Edge
+        END FUNCTION EdgeResidual
+
+        FUNCTION BoundaryResidual( Model, Edge, Mesh, Quant, Perm,Gnorm ) RESULT( Indicator )
+            !------------------------------------------------------------------------------
+            USE Types
+
+            IMPLICIT NONE
+            !------------------------------------------------------------------------------
+            TYPE(Model_t) :: Model
+            INTEGER :: Perm(:)
+            REAL(KIND=dp) :: Quant(:), Indicator(2), Gnorm
+            TYPE( Mesh_t ), POINTER    :: Mesh
+            TYPE( Element_t ), POINTER :: Edge
+        END FUNCTION BoundaryResidual
+
+    END INTERFACE
+
     !------------------------------------------------------------------------------
     TYPE(Solver_t) :: Solver
     TYPE(Model_t) :: Model
@@ -49,6 +93,8 @@ SUBROUTINE SESolver( Model,Solver,dt,TransientSimulation )
     ! Local variables
     !------------------------------------------------------------------------------
     TYPE(Element_t),POINTER :: Element
+    REAL(KIND=dp), POINTER :: XePol(:)
+    INTEGER, POINTER :: Perms(:)
     REAL(KIND=dp) :: Norm
     INTEGER :: n, nb, nd, t, active
     INTEGER :: iter, maxiter
@@ -56,10 +102,13 @@ SUBROUTINE SESolver( Model,Solver,dt,TransientSimulation )
     !------------------------------------------------------------------------------
 
     CALL DefaultStart()
-  
+
     maxiter = ListGetInteger( GetSolverParams(),&
         'Nonlinear System Max Iterations',Found,minv=1)
+
+
     IF(.NOT. Found ) maxiter = 1
+
 
     ! Nonlinear iteration loop:
     !--------------------------
@@ -96,6 +145,14 @@ SUBROUTINE SESolver( Model,Solver,dt,TransientSimulation )
         ! And finally, solve:
         !--------------------
         Norm = DefaultSolve()
+
+        XePol=> Solver % Variable % Values
+        Perms=> Solver % Variable % Perm
+
+        IF (ListGetLogical(Solver % Values, 'Adaptive Mesh Refinement', Found)) &
+            CALL RefineMesh(Model,Solver,Xepol,Perms, &
+            InsideResidual, EdgeResidual, BoundaryResidual)
+
         IF( DefaultConverged() ) EXIT
 
     END DO
@@ -155,6 +212,7 @@ CONTAINS
 
         react_coeff = spinexchangerate + spinrelaxationrate
 
+        time_coeff(1:n) = 1
         Velo = 0._dp
         DO i=1,dim
             Velo(i,1:n)=GetReal(Material,&
@@ -174,7 +232,7 @@ CONTAINS
             !------------------------------------------
             LoadAtIP = SUM( Basis(1:n) * LOAD(1:n) )
 
-            rho = SUM(Basis(1:n))
+            rho = SUM(Basis(1:n)*time_coeff(1:n))
             a = MATMUL(Velo(:,1:n),Basis(1:n))
             D = SUM(Basis(1:n)*diff_coeff(1:n))
             C = SUM(Basis(1:n))
@@ -244,12 +302,13 @@ CONTAINS
         FORCE = 0._dp
         LOAD = 0._dp
 
-        Flux(1:n)  = GetReal( BC,'T1 Coefficient', Found )
-        CALL FoundCheck(Found, 'T1 Coefficient', 'warn')
 
-        Flux = - Flux
-        Coeff(1:n) = 0
-        Ext_t(1:n) = 0
+        Flux = 0.0d0
+        Coeff(1:n) = 0.0d0
+        Ext_t(1:n) = 0.0d0
+
+        Coeff(1:n)  = GetReal( BC,'T1 Coefficient', Found )
+        CALL FoundCheck(Found, 'T1 Coefficient', 'warn')
 
         ! Numerical integration:
         !-----------------------
@@ -267,12 +326,12 @@ CONTAINS
 
             ! Given flux:
             ! -----------
-            F = SUM(Basis(1:n)*flux(1:n))
+            F = SUM(Basis(1:n)*Flux(1:n))
 
-            ! Robin condition (C*(u-u_0)):
-            ! ---------------------------
-            C = SUM(Basis(1:n))
-            Ext = SUM(Basis(1:n))
+                  ! Robin condition (C*(u-u_0)):
+                  ! ---------------------------
+            C = SUM(Basis(1:n)*Coeff(1:n))
+            Ext = SUM(Basis(1:n)*Ext_t(1:n))
 
             DO p=1,nd
                 DO q=1,nd
@@ -285,9 +344,9 @@ CONTAINS
         CALL DefaultUpdateEquations(STIFF,FORCE)
     !------------------------------------------------------------------------------
     END SUBROUTINE LocalMatrixBC
-!------------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
 
-
+    !------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
 END SUBROUTINE SESolver
@@ -319,4 +378,151 @@ SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
 
 !-------------------------------------------------------------------------
 END SUBROUTINE FoundCheck
+
+FUNCTION InsideResidual(Model, Element, Mesh,&
+    Quant, Perm, Fnorm) RESULT( Indicator )
+    !------------------------------------------------------------------------------
+
+    USE Defutils
+
+    IMPLICIT NONE
+    TYPE(Model_t) :: Model
+    INTEGER :: Perm(:)
+    REAL(KIND=dp) :: Quant(:), Indicator(2), Fnorm
+    TYPE(Mesh_t), POINTER    :: Mesh
+    TYPE(Element_t), POINTER :: Element
+    TYPE(GaussIntegrationPoints_t), TARGET :: IP
+    TYPE(Nodes_t) :: Nodes
+    SAVE Nodes
+    TYPE(ValueList_t), POINTER :: Material
+    REAL(KIND=dp) :: f, hK, detJ
+    REAL(KIND=dp), ALLOCATABLE :: Basis(:), dBasisdx(:,:), ddBasisddx(:,:,:),&
+        spinexchangerate(:), alkalipolarization(:), solution(:),&
+        diff_coeff(:), spinrelaxationrate(:), Velo(:,:)
+    LOGICAL :: stat, found
+    INTEGER :: n, dim, j, numnodes
+
+    numnodes = Element % TYPE % NumberOfNodes
+
+    dim=CoordinateSystemDimension()
+
+    ALLOCATE(Basis(numnodes), dBasisdx(numnodes,dim),ddBasisddx(numnodes,dim,dim),&
+        spinexchangerate(numnodes), alkalipolarization(numnodes),&
+        solution(numnodes), diff_coeff(numnodes), spinrelaxationrate(numnodes),&
+        Velo(dim,numnodes))
+
+    CALL GetElementNodes( Nodes )
+
+    Indicator = 0.0d0
+    Fnorm = 0.0d0
+    hK = Element % hK
+
+            !Diffusion coefficient
+    Material => GetMaterial()
+    diff_coeff(1:numnodes)=GetReal(Material,'xe diffusivity',found)
+
+    alkalipolarization(1:numnodes)=GetReal(Material, 'alkali polarization', found)
+    CALL FoundCheck(found, 'alkali polarization', 'fatal')
+
+    spinrelaxationrate(1:numnodes)=GetReal(Material, 'spin relaxation rate', found)
+    CALL FoundCheck(found, 'spin relaxation rate', 'fatal')
+
+    spinexchangerate(1:numnodes)=GetReal(Material, 'spin exchange rate', found)
+    CALL FoundCheck(found, 'spin exchange rate', 'fatal')
+
+    !The reaction coefficient is the spin-exchange rate +
+    !The spin-destruction rate.
+
+    Velo = 0._dp
+    DO j=1,dim
+        Velo(j,1:numnodes)=GetReal(Material,&
+            'convection velocity '//TRIM(I2S(j)),found)
+    END DO
+
+    CALL GetScalarLocalSolution(solution, 'XePol', Element)
+
+    IP = GaussPoints(Element)
+
+    DO n = 1, IP%n
+
+        stat = ElementInfo(Element, Nodes, IP % u(n), IP % v(n),&
+            IP % w(n), detJ, Basis, dBasisdx, ddBasisddx, .TRUE.)
+
+
+
+        DO j=1,dim
+            !+dDXe.dsolution
+
+            Indicator= SUM(solution(1:numnodes)*dBasisdx(1:numnodes,j))*&
+                SUM(diff_coeff(1:numnodes)*dBasisdx(1:numnodes,j))
+            !+u.dsolution
+            Indicator=Indicator+&
+                SUM( Velo(j,1:numnodes) * Basis(1:numnodes) ) * &
+                SUM( solution(1:numnodes) * dBasisdx(1:numnodes,j) )
+        END DO
+
+        !+(spinex+spinrelax)*solution
+
+        Indicator=Indicator+&
+            (SUM(spinexchangerate(1:numnodes)*Basis(1:numnodes))+&
+            SUM(spinrelaxationrate(1:numnodes)*Basis(1:numnodes)))*&
+            SUM(solution(1:numnodes)*Basis(1:numnodes))
+
+        !-spinex*alkalipol
+        Indicator=Indicator-&
+            SUM(spinexchangerate(1:numnodes)*Basis(numnodes))*&
+            SUM(alkalipolarization(1:numnodes)*Basis(numnodes))
+
+        Indicator = Indicator**2*detJ*IP % s(n)
+
+    END DO
+
+    Fnorm = SQRT(Fnorm)
+    Indicator = hK*SQRT(Indicator)
+
+    DEALLOCATE(Basis, dBasisdx,ddBasisddx,&
+        spinexchangerate, alkalipolarization,&
+        solution, diff_coeff, spinrelaxationrate,&
+        Velo)
+
+!----------------------------------------------------------------------------------
+END FUNCTION InsideResidual
+!----------------------------------------------------------------------------------
+
+!--------------------------------------------------------------------------------
+FUNCTION EdgeResidual( Model, Edge, Mesh, Quant, Perm ) RESULT( Indicator )
+    !------------------------------------------------------------------------------
+    USE Defutils
+
+    IMPLICIT NONE
+
+    TYPE(Model_t) :: Model
+    INTEGER :: Perm(:)
+    REAL(KIND=dp) :: Quant(:), Indicator(2)
+    TYPE( Mesh_t ), POINTER    :: Mesh
+    TYPE( Element_t ), POINTER :: Edge
+
+    Indicator=0.0d0
+
+!---------------------------------------------------------------------------------
+END FUNCTION EdgeResidual
+    !---------------------------------------------------------------------------------
+
+FUNCTION BoundaryResidual( Model, Edge, Mesh, Quant, Perm,Gnorm ) RESULT( Indicator )
+    !------------------------------------------------------------------------------
+    USE DefUtils
+
+    IMPLICIT NONE
+    !------------------------------------------------------------------------------
+    TYPE(Model_t) :: Model
+    INTEGER :: Perm(:)
+    REAL(KIND=dp) :: Quant(:), Indicator(2), Gnorm
+    TYPE( Mesh_t ), POINTER    :: Mesh
+    TYPE( Element_t ), POINTER :: Edge
+
+    Indicator=0.0d0
+!---------------------------------------------------------------------------------
+END FUNCTION BoundaryResidual
+    !--------------------------------------------------------------------------------
+
 
