@@ -44,19 +44,19 @@ End
 
 Boundary Condition 1
   Target Boundaries(1) = 1
-  T1 Coefficient = Real -1
+  T1 Coefficient = Real 1
 
 End
 
 Boundary Condition 2
   Target Boundaries(1) = 2
-  T1 Coefficient = Real -1
+  T1 Coefficient = Real 1
 
 End
 
 Boundary Condition 3
   Target Boundaries(2) = 3 4
-  T1 Coefficient = Real -1
+  T1 Coefficient = Real 1
 
 End
 !Solver 1 :: Reference Norm = Real 1.0578593
