@@ -56,6 +56,7 @@ Material 1
   xe spin destruction rate = Real 9.08e-21 !Nelson 2001
   n2 spin destruction rate = Real 9e-24!Fink et al. 2005
   he spin destruction rate = Real 2e-24!Fink et al. 2005
+  short-very short transition density = Real 7.2577554e-26 !Nelson 2001
 
   alkali polarization = Variable optrate, Concentration, Temperature, Pressure; Real Procedure "OPSolver" "CalculateRbPol"
 

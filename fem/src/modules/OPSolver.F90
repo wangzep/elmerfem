@@ -836,7 +836,7 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
     !----------------------------------------------------------------------
 
     REAL(KIND=dp) :: alkali_alkali_spin_destruction_rate, xe_spin_destruction_rate,&
-        he_spin_destruction_rate, n2_spin_destruction_rate
+        he_spin_destruction_rate, n2_spin_destruction_rate, G1
     REAL(KIND=dp) :: xe_fraction, n2_fraction, he_fraction, xe_numberdensity,&
         he_numberdensity, n2_numberdensity,tot_numberdensity, ref_pressure
     REAL(KIND=dp) :: loschmidt
@@ -991,9 +991,17 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
         END IF
 
         !Implement van der Walls contribution to spin destruction rate
+        !See Nelson's 2001 thesis for details.
         IF (vanderWall_term_included) THEN
+
+
+            G1 = 0.0D0
+            G1 = GetConstReal(Materials,'short-very short transition density',found)
+            CALL FoundCheck(found, 'short-very short transition density', 'fatal')
+
             SpinDestrucionRate=SpinDestrucionRate+&
-                6469/(xe_fraction+1.1*n2_fraction+3.2*he_fraction)
+                (0.385+0.642*1/(1+G1/tot_numberdensity))&
+                    *6469/(xe_fraction+1.1*n2_fraction+3.2*he_fraction)
         END IF
     END IF
 
