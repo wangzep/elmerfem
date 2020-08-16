@@ -278,10 +278,15 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     binary_term=xe_binary*xe_fraction*&
         ((Pressure)/101325)*(273.15/Temperature)*loschmidt
 
-    vdWterm=xe_vdW_term*(1/(1+he_ratio_term*he_fraction/xe_fraction)*&
-        ((Pressure)/101325)*(273.15/Temperature)*loschmidt*he_fraction+&
-        1/(1+n2_ratio_term*n2_fraction/xe_fraction)*&
-        ((Pressure)/101325)*(273.15/Temperature)*loschmidt*n2_fraction)
+    xe_vdW_term=GetConstReal(Materials, 'xe van der Waal spin relaxation', found)
+    CALL FoundCheck(found, 'xe van der Waal spin relaxation', 'fatal')
+    he_ratio_term=GetConstReal(Materials, 'spin relaxation he r', found)
+    CALL FoundCheck(found, 'spin relaxation he r', 'fatal')
+    n2_ratio_term=GetConstReal(Materials, 'spin relaxation n2 r', found)
+    CALL FoundCheck(found, 'spin relaxation n2 r', 'fatal')
+
+    vdWterm=xe_vdW_term*(1/(1+he_ratio_term*he_fraction/xe_fraction+&
+        n2_ratio_term*n2_fraction/xe_fraction))
 
     SpinRelaxationRate=binary_term+vdWterm
 
