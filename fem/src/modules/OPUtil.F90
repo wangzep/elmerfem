@@ -237,6 +237,8 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     REAL(KIND=dp) :: Argument(2)
     REAL(KIND=dp) :: Pressure,Temperature
     REAL(KIND=dp) :: he_fraction=0, xe_fraction=0, n2_fraction=0
+    REAL(KIND=dp) :: he_ratio_term, n2_ratio_term, xe_vdW_term, xe_binary,&
+        loschmidt
     REAL(KIND=dp) :: SpinRelaxationRate
     REAL(kind=dp) :: binary_term=0, vdWterm=0
     TYPE(ValueList_t), POINTER :: Materials
@@ -264,9 +266,22 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
             'Gas fractions do not add to 1')
     END IF
 
-    binary_term=(5D-6)*xe_fraction*((Pressure)/101325)*(273.15/Temperature)
+    loschmidt=GetConstReal(Model % Constants, 'loschmidts constant', found)
+    CALL FoundCheck(found, 'loschmidts constant' , 'warn')
+    IF (.NOT. found) THEN
+        loschmidt= 2.6867811D25
+    END IF
 
-    vdWterm=6.72D-5*(1/(1+0.25*he_fraction/xe_fraction+1.05*n2_fraction/xe_fraction))
+    xe_binary=GetConstReal(Materials, 'binary spin relaxation', found)
+    CALL FoundCheck(found, 'binary spin relaxation', 'fatal')
+
+    binary_term=xe_binary*xe_fraction*&
+        ((Pressure)/101325)*(273.15/Temperature)*loschmidt
+
+    vdWterm=xe_vdW_term*(1/(1+he_ratio_term*he_fraction/xe_fraction)*&
+        ((Pressure)/101325)*(273.15/Temperature)*loschmidt*he_fraction+&
+        1/(1+n2_ratio_term*n2_fraction/xe_fraction)*&
+        ((Pressure)/101325)*(273.15/Temperature)*loschmidt*n2_fraction)
 
     SpinRelaxationRate=binary_term+vdWterm
 

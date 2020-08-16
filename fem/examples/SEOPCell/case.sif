@@ -74,6 +74,11 @@ Material 1
   xe molecular se rate = Real 5230
   n2 molecular se rate = Real 5700
   he molecular se rate = Real 17000
+
+  binary spin relaxation = Real 1.9e-31 !Chann 2002
+  xe van der Waal spin relaxation = Real 6.72e-5 !Chann 2002
+  spin relaxation he r = Real 0.25 !Chann 2002
+  spin relaxation n2 r = Real 1.05 !Chann 2002
   
 
   spin exchange rate = Variable Concentration, Temperature, Pressure; Real Procedure "OPUtil" "CalculateSpinExchangeRate"
