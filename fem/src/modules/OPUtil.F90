@@ -152,13 +152,13 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     !Eventaully I might import more terms, so this is anticpating that eventuallity
     Concentration=Argument(1)
 
-    Temperature=Argument(2)
+    Temperature=Argument(3)
 
 
-    IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+    IF (Temperature .EQ. 0.0D0) Call Fatal('GetSpinDestructionRate',&
         'Temperature variable not found.')
 
-    Pressure=Argument(3)
+    Pressure=Argument(2)
 
     Constants=>GetConstants()
     Materials=>GetMaterial()
@@ -203,7 +203,7 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
 
 
 
-    tot_numberdensity = ((Pressure)/101325)*(273.15/Temperature)*loschmidt
+    tot_numberdensity = ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
 
     xe_numberdensity=tot_numberdensity*xe_fraction
 
@@ -223,7 +223,7 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     CALL FoundCheck(found, 'xe molecular se rate', 'fatal')
 
 
-    SpinExchangeRate=SpinExchangeRate+(1/(xe_numberdensity/xemolcrate&
+    SpinExchangeRate=SpinExchangeRate+(1.0D0/(xe_numberdensity/xemolcrate&
         +he_numberdensity/hemolcrate+n2_numberdensity/n2molcrate))*Concentration
 
 END FUNCTION CalculateSpinExchangeRate
@@ -234,8 +234,8 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     IMPLICIT None
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: Argument(2)
-    REAL(KIND=dp) :: Pressure,Temperature
+    REAL(KIND=dp) :: Argument(3)
+    REAL(KIND=dp) :: Concentration,Pressure,Temperature
     REAL(KIND=dp) :: he_fraction=0, xe_fraction=0, n2_fraction=0
     REAL(KIND=dp) :: he_ratio_term, n2_ratio_term, xe_vdW_term, xe_binary,&
         loschmidt
@@ -247,8 +247,9 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
 
     Materials=>GetMaterial()
 
-    Pressure=Argument(1)
-    Temperature=Argument(2)
+    Concentration=Argument(1)
+    Pressure=Argument(2)
+    Temperature=Argument(3)
 
     xe_fraction=GetConstReal(Materials, 'xe fraction', found)
     CALL FoundCheck(found, 'xe fraction', 'fatal')
@@ -276,7 +277,7 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     CALL FoundCheck(found, 'binary spin relaxation', 'fatal')
 
     binary_term=xe_binary*xe_fraction*&
-        ((Pressure)/101325)*(273.15/Temperature)*loschmidt
+        ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
 
     xe_vdW_term=GetConstReal(Materials, 'xe van der Waal spin relaxation', found)
     CALL FoundCheck(found, 'xe van der Waal spin relaxation', 'fatal')
@@ -285,7 +286,7 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     n2_ratio_term=GetConstReal(Materials, 'spin relaxation n2 r', found)
     CALL FoundCheck(found, 'spin relaxation n2 r', 'fatal')
 
-    vdWterm=xe_vdW_term*(1/(1+he_ratio_term*he_fraction/xe_fraction+&
+    vdWterm=xe_vdW_term*(1.0D0/(1.0D0+he_ratio_term*he_fraction/xe_fraction+&
         n2_ratio_term*n2_fraction/xe_fraction))
 
     SpinRelaxationRate=binary_term+vdWterm
@@ -300,40 +301,42 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
     IMPLICIT None
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: Argument(2)
+    REAL(KIND=dp) :: Argument(3)
     REAL(KIND=dp) :: D_Xe
     !-------------------------------------------------------
-    REAL(KIND=dp) :: Pressure,Temperature
+    REAL(KIND=dp) :: Concentration,Pressure,Temperature
     REAL(KIND=dp) :: pressure_atm=0
 
     REAL(KIND=dp) :: mixKesp=0, tprime=0, omega=0, sigma=0, Mtot=0
     !------------------------------------------------------------
     !I believe these are all gotten from Lightfoot, sans the masses
-    REAL(Kind=dp), PARAMETER :: A=1.858D-7, sigmaHe=2.576, sigmaXe=4.009,&
-        KespHe=10.02, KespXe=234.7, massXe=131.29, massHe=4.003
+    REAL(KIND=dp), PARAMETER :: A=1.858D-7, sigmaHe=2.576D0, sigmaXe=4.009D0,&
+        KespHe=10.02D0, KespXe=234.7D0, massXe=131.29D0, massHe=4.003D0
 
     !------------------------------------------------------------
 
+
+
     !Getting assignments
-    Pressure=Argument(1)
-    Temperature=Argument(2)
+    Concentration=Argument(1)
+    Pressure=Argument(2)
+    Temperature=Argument(3)
 
     !Convert to atm
-    pressure_atm=(Pressure)/101325
+    pressure_atm=(Pressure)/101325.0D0
 
     !Actually doing the calcuation.
     mixKesp=sqrt(KespHe*KespXe)
     tprime = Temperature/mixKesp
 
-    omega = (1.06036/tprime**(0.15610))+(0.19300/exp(0.47635*tprime))+&
-        (1.03587/exp(1.52296*tprime))+(1.76474/exp(3.89411*tprime))
+    omega = (1.06036D0/tprime**(0.15610D0))+(0.19300D0/exp(0.47635D0*tprime))+&
+        (1.03587D0/exp(1.52296D0*tprime))+(1.76474D0/exp(3.89411D0*tprime))
 
-    sigma = 0.5*(sigmaHe+sigmaXe)
+    sigma = 0.5D0*(sigmaHe+sigmaXe)
 
     Mtot = sqrt(1/massHe+1/massXe)
 
-    D_Xe = (A*Temperature**(3/2)*Mtot)/(pressure_atm*omega*sigma**2)
-
+    D_Xe = (A*Temperature**(3.0D0/2.0D0)*Mtot)/(pressure_atm*omega*sigma**2D0)
 
 
 END FUNCTION CalculateXenonDiffusion
@@ -344,12 +347,13 @@ FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
     IMPLICIT None
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: argument(2)
-    REAL(KIND=dp) :: pressure, temperature
+    REAL(KIND=dp) :: argument(3)
+    REAL(KIND=dp) :: concentration,pressure, temperature
     REAL(KIND=dp) :: decayrate
     !--------------------------------------------
     REAL(KIND=dp) :: cell_radius=0, cellT1=0,&
-        pressureT1=0, temperatureT1=0, T1vals(2), minT1, rpi
+        pressureT1=0, temperatureT1=0, T1vals(3), minT1, rpi,&
+        dumb=0
     REAL(KIND=SELECTED_REAL_KIND(12)) :: initialD_Xe=0, CalculateXenonDiffusion
 
     TYPE(ValueList_t), POINTER :: Constants
@@ -373,13 +377,13 @@ FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
     temperatureT1=GetConstReal(Constants, 'T1 Temperature', found)
     CALL FoundCheck(found, 'T1 Temperature', 'fatal')
 
-    T1vals = (/pressureT1,temperatureT1/)
+    T1vals = (/dumb,pressureT1,temperatureT1/)
 
     initialD_Xe=CalculateXenonDiffusion(Model, 1, T1vals)
 
     !Check to make sure that we are longer than the minumum T1
 
-    minT1 = cell_radius**2/((rpi**2)*initialD_Xe)
+    minT1 = cell_radius**2.0D0/((rpi**2.0D0)*initialD_Xe)
 
     check = (cellT1>minT1)
 
@@ -407,7 +411,7 @@ FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
     IMPLICIT None
     TYPE(Model_t) :: model
     INTEGER :: n
-    REAL(KIND=dp) :: Temp !Dummy Variable. Not actually used
+    REAL(KIND=dp) :: Temp(3) !Dummy Variable. Not actually used
     REAL(KIND=dp) :: RbNumDensity_m, Temperature
     LOGICAL :: found=.FALSE.
     !------------------------------------------------------------------------
@@ -421,7 +425,7 @@ FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
         'Temperature not found')
 
 
-    RbNumDensity_m=(10**(9.55-4132/Temperature))/(1.380648521D-23*Temperature)
+    RbNumDensity_m=(10**(9.55D0-4132.0D0/Temperature))/(1.380648521D-23*Temperature)
 
 
 END FUNCTION calculaterbmumdensitym
@@ -464,7 +468,7 @@ FUNCTION calculaterbfrequency(Model,n,pressure) RESULT(freqwidth)
     pressure = GetConstReal(Materials, 'frequency pressure', found)
     CALL FoundCheck(found, 'frequency pressure', 'fatal')
 
-    freqwidth=pressure/(18.9*xe_fraction+17.8*n2_fraction+18*he_fraction)
+    freqwidth=pressure/(18.9D0*xe_fraction+17.8D0*n2_fraction+18.0D0*he_fraction)
 
 END FUNCTION calculaterbfrequency
 
@@ -475,7 +479,7 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: arguments
+    REAL(KIND=dp) :: arguments(3)
     REAL(KIND=dp) :: heating
     !------------------------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials, Constants
@@ -508,7 +512,7 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
             'One or more of the constants are not listed in the SIF. Using default values SI units.')
     END IF
 
-    concentration=arguments
+    concentration=arguments(1)
 
     laser_frequency = speed_of_light/laser_wavelength
 
@@ -526,39 +530,41 @@ FUNCTION calculateevaprate(Model,n,arguments)Result(evaprate)
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: arguments
+    REAL(KIND=dp) :: arguments(3)
     REAL(KIND=dp) :: evaprate
     !----------------------------------------------------------------------------
     REAL(KIND=dp) :: gasconstants, avagradosnumber, boltzmansconstant,&
         rpi, alpha, mass, temperature
-    TYPE(ValueList_t), POINTER :: Materials, Constants
+    TYPE(ValueList_t), POINTER :: Constants, BC
     LOGICAL :: found, found1, found2, found3
     !----------------------------------------------------------------------------
 
     rpi=4.D0*DATAN(1.D0)
 
-    Materials=> GetMaterial()
+    BC=> GetBC()
     Constants=> GetConstants()
 
-    temperature=arguments
+    temperature=arguments(3)
 
     gasconstants=GetConstReal(Constants, 'gas constant', found1)
     avagradosnumber=GetConstReal(Constants, 'avagrados number', found2)
     boltzmansconstant=GetConstReal(Constants, 'boltzmans constant', found3)
 
     IF (.NOT. (found1 .OR. found2 .OR. found3)) THEN
-        gasconstants=8.31446261815324
-        avagradosnumber=6.02214076e23
-        boltzmansconstant=1.38064852e-23
+        gasconstants=8.31446261815324D0
+        avagradosnumber=6.02214076D23
+        boltzmansconstant=1.38064852D-23
 
         CALL Warn('calculateevaprate',&
             'One or more of the constants are not listed in the SIF. Using default values SI units.')
     END IF
 
-    alpha=GetConstReal(Materials, 'alpha', found)
+    alpha=GetConstReal(BC, 'alpha', found)
     CALL FoundCheck(found, 'alpha', 'fatal')
 
-    mass=GetConstReal(Materials, 'evap atomic mass', found)
+    mass=GetConstReal(BC, 'evap atomic mass', found)
+    CALL FoundCheck(found, 'evap atomic mass', 'fatal')
+
 
     evaprate=(alpha*gasconstants*temperature)/(avagradosnumber*&
         sqrt(2*rpi*mass/avagradosnumber*boltzmansconstant*temperature))
@@ -574,7 +580,7 @@ FUNCTION calculateheattransfercoef(Model,n,arguments)RESULT(heatranscoef)
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: arguments
+    REAL(KIND=dp) :: arguments(3)
     REAL(KIND=dp) :: heatranscoef
     !----------------------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials
@@ -603,7 +609,7 @@ FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscosity)
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: arguments
+    REAL(KIND=dp) :: arguments(3)
     REAL(KIND=dp) :: viscosity
     !------------------------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials
@@ -613,7 +619,7 @@ FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscosity)
     LOGICAL :: found
     !------------------------------------------------------------------------------
 
-    temperature = arguments
+    temperature = arguments(3)
 
     Materials=>GetMaterial()
 
@@ -634,15 +640,15 @@ FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscosity)
     END IF
 
     !Calculate the individual viscosities
-    viscosity_n2 = 1.66*(273.15+111)/(temperature+111)*(temperature/273.15)**(3/2)
+    viscosity_n2 = 1.66D0*(273.15D0+111)/(temperature+111.0D0)*(temperature/273.15D0)**(3.0D0/2.0D0)
 
-    viscosity_he = 1.87*(273.15+79.4)/(temperature+79.4)*(temperature/273.15)**(3/2)
+    viscosity_he = 1.87D0*(273.15D0+79.4)/(temperature+79.4D0)*(temperature/273.15D0)**(3.0D0/2.0D0)
 
-    viscosity_xe = 2.12*(273.15+252)/(temperature+252)*(temperature/273.15)**(3/2)
+    viscosity_xe = 2.12D0*(273.15D0+252.0D0)/(temperature+252.0D0)*(temperature/273.15D0)**(3.0D0/2.0D0)
 
     !Add viscosities
-    viscosity=(he_fraction*viscosity_he**(1/3)+n2_fraction*viscosity_n2**(1/3)&
-        +xe_fraction*viscosity_xe**(1/3))**3
+    viscosity=(he_fraction*viscosity_he**(1.0D0/3.0D0)+n2_fraction*viscosity_n2**(1.0D0/3.0D0)&
+        +xe_fraction*viscosity_xe**(1.0D0/3.0D0))**3.0D0
 
 END FUNCTION calculateviscosity
 
@@ -653,7 +659,7 @@ FUNCTION calculateheatcapratio(Model,n,arguments)RESULT(heatcapratio)
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: arguments
+    REAL(KIND=dp) :: arguments(3)
     REAL(KIND=dp) :: heatcapratio
     !-----------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials
@@ -679,7 +685,7 @@ FUNCTION calculateheatcapratio(Model,n,arguments)RESULT(heatcapratio)
             'Gas fractions do not add to 1')
     END IF
 
-    heatcapratio=5/3*(xe_fraction+he_fraction)+7/5*n2_fraction
+    heatcapratio=5.0D0/3.0D0*(xe_fraction+he_fraction)+7.0D0/5.0D0*n2_fraction
 
 END FUNCTION calculateheatcapratio
 
@@ -691,7 +697,7 @@ FUNCTION calculatecp(Model,n,arguments)RESULT(cp)
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: arguments
+    REAL(KIND=dp) :: arguments(3)
     REAL(KIND=dp) :: cp
         !---------------------------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials
@@ -718,13 +724,13 @@ FUNCTION calculatecp(Model,n,arguments)RESULT(cp)
             'Gas fractions do not add to 1')
     END IF
 
-    avgmolarmass = xe_fraction*131.293+n2_fraction*28.0134+he_fraction*4.002602
+    avgmolarmass = xe_fraction*131.293D0+n2_fraction*28.0134D0+he_fraction*4.002602D0
 
-    xemassfrac = xe_fraction*131.293/avgmolarmass
-    n2massfrac = n2_fraction*28.0134/avgmolarmass
-    hemassfrac = he_fraction*4.0026202/avgmolarmass
+    xemassfrac = xe_fraction*131.293D0/avgmolarmass
+    n2massfrac = n2_fraction*28.0134D0/avgmolarmass
+    hemassfrac = he_fraction*4.0026202D0/avgmolarmass
 
-    cp = xemassfrac*158.31+n2massfrac*1039.67+5196.118*hemassfrac
+    cp = xemassfrac*158.31D0+n2massfrac*1039.67D0+5196.118D0*hemassfrac
 END FUNCTION calculatecp
 
 SUBROUTINE FoundCheck(found,name,warn_fatal_flag)

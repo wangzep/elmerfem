@@ -473,7 +473,7 @@ FUNCTION InsideResidual(Model, Element, Mesh,&
             SUM(spinexchangerate(1:numnodes)*Basis(numnodes))*&
             SUM(alkalipolarization(1:numnodes)*Basis(numnodes))
 
-        Indicator = Indicator**2*detJ*IP % s(n)
+        Indicator = Indicator**2.0D0*detJ*IP % s(n)
 
     END DO
 

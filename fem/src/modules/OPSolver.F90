@@ -466,7 +466,7 @@ CONTAINS
             oscillator_strength=1.0D0/3.0D0
             plank_constant = 6.62607004D-34
             speed_of_light = 299792458.0D0
-            electron_radius = 2.8179403267e-15
+            electron_radius = 2.8179403267D-15
 
             CALL Warn('BetaCalc',&
                 'One or more of the constants are not listed in the SIF. Using default values SI units.')
@@ -490,11 +490,11 @@ CONTAINS
         !The second equation here uses the dispresion relationship
         laser_frequency = speed_of_light/laser_wavelength
 
-        laser_freq_width = (speed_of_light*laser_linewidth)/(laser_wavelength)**2
+        laser_freq_width = (speed_of_light*laser_linewidth)/(laser_wavelength)**2.0D0
 
         absorb_laser_ratio = alkali_freq_width/laser_freq_width
 
-        frequency_shift = 2*(laser_frequency - alkali_frequency)/laser_freq_width
+        frequency_shift = 2.0D0*(laser_frequency - alkali_frequency)/laser_freq_width
 
         !So... A8 is the Faddeeva function written in a funny way. Note, that in order to recover
         !The Faddeeva function normally, we need to divide the arguement of erfc in A8 by -i.
@@ -820,7 +820,7 @@ FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
         'Temperature not found')
 
 
-    RbNumDensity_m=(10**(9.55-4132/Temperature))/(1.380648521D-23*Temperature)
+    RbNumDensity_m=(10**(9.55D0-4132.0D0/Temperature))/(1.380648521D-23*Temperature)
 
 
 END FUNCTION calculaterbmumdensitym
@@ -945,7 +945,7 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
             loschmidt= 2.6867811D25
         END IF
 
-        tot_numberdensity = ((Pressure)/101325)*(273.15/Temperature)*loschmidt
+        tot_numberdensity = ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
 
         xe_numberdensity=tot_numberdensity*xe_fraction
 
@@ -1000,8 +1000,8 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
             CALL FoundCheck(found, 'short-very short transition density', 'fatal')
 
             SpinDestrucionRate=SpinDestrucionRate+&
-                (0.385+0.642*1/(1+G1/tot_numberdensity))&
-                    *6469/(xe_fraction+1.1*n2_fraction+3.2*he_fraction)
+                (0.385D0+0.642D0*1.0D0/(1.0D0+G1/tot_numberdensity))&
+                    *6469.0D0/(xe_fraction+1.1D0*n2_fraction+3.2D0*he_fraction)
         END IF
     END IF
 
