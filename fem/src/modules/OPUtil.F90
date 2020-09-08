@@ -604,20 +604,20 @@ FUNCTION calculateheattransfercoef(Model,n,arguments)RESULT(heatranscoef)
     REAL(KIND=dp) :: arguments(3)
     REAL(KIND=dp) :: heatranscoef
     !----------------------------------------------------------------------------
-    TYPE(ValueList_t), POINTER :: Materials
+    TYPE(ValueList_t), POINTER :: BC
     REAL(KIND=dp) :: airheattrans, glassthermalconst, glassthickness
     LOGICAL :: found
     !----------------------------------------------------------------------------
 
-    Materials=>GetMaterial()
+    BC=> GetBC()
 
-    airheattrans=GetConstReal(Materials, 'air heat transfer coefficient', found)
+    airheattrans=GetConstReal(BC, 'air heat transfer coefficient', found)
     CALL FoundCheck(found, 'air heat transfer coefficient', 'fatal')
 
-    glassthermalconst=GetConstReal(Materials, 'glass thermal conductivity', found)
+    glassthermalconst=GetConstReal(BC, 'glass thermal conductivity', found)
     CALL FoundCheck(found, 'glass thermal conductivity', 'fatal')
 
-    glassthickness=GetConstReal(Materials, 'glass thickness', found)
+    glassthickness=GetConstReal(BC, 'glass thickness', found)
     CALL FoundCheck(found, 'glass thickness', 'fatal')
 
     heatranscoef = (1/airheattrans + glassthickness/glassthermalconst)**(-1)
