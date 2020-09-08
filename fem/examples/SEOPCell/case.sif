@@ -2,7 +2,7 @@ Check Keywords "Warn"
 
 Header :: Mesh DB "." "Cell"
 
-$temp=473.15
+$temp=273.15+170
 
 Constants
 
@@ -17,7 +17,7 @@ Constants
 
   Compute Laser Power = LOGICAL True
 
-  Laser Spot Size = Real 122.5e-4
+  Laser Spot Size = Real 90e-4
 
   cell radius = Real .03
   T1 = Real 120
@@ -75,7 +75,7 @@ Material 1
   n2 molecular se rate = Real 5700
   he molecular se rate = Real 17000
 
-  binary spin relaxation = Real 1.9e-31 !Chann 2002
+  binary spin relaxation = Real 1.86e-31 !Fink 2005
   xe van der Waal spin relaxation = Real 6.72e-5 !Chann 2002
   spin relaxation he r = Real 0.25 !Chann 2002
   spin relaxation n2 r = Real 1.05 !Chann 2002
@@ -172,7 +172,7 @@ End
 Boundary Condition 1
   Target Boundaries(1) = 1
   !optrate = Real 62359
-  Laser Power = Real 150
+  Laser Power = Real 120
   Concentration = Variable optrate 
   Procedure "OPUtil" "calculaterbmumdensitym"
 

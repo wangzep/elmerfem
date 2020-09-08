@@ -534,7 +534,7 @@ FUNCTION calculateevaprate(Model,n,arguments)Result(evaprate)
     REAL(KIND=dp) :: evaprate
     !----------------------------------------------------------------------------
     REAL(KIND=dp) :: gasconstants, avagradosnumber, boltzmansconstant,&
-        rpi, alpha, mass, temperature
+        rpi, alpha, mass, temperature, loschmidt, prefactor
     TYPE(ValueList_t), POINTER :: Constants, BC
     LOGICAL :: found, found1, found2, found3
     !----------------------------------------------------------------------------
@@ -546,13 +546,14 @@ FUNCTION calculateevaprate(Model,n,arguments)Result(evaprate)
 
     temperature=arguments(3)
 
-    gasconstants=GetConstReal(Constants, 'gas constant', found1)
-    avagradosnumber=GetConstReal(Constants, 'avagrados number', found2)
-    boltzmansconstant=GetConstReal(Constants, 'boltzmans constant', found3)
+    !Gas constant and avagrdos number are not used in this formulation
+    !gasconstants=GetConstReal(Constants, 'gas constant', found1)
+    !avagradosnumber=GetConstReal(Constants, 'avagrados number', found2)
+    boltzmansconstant=GetConstReal(Constants, 'boltzmans constant', found)
 
-    IF (.NOT. (found1 .OR. found2 .OR. found3)) THEN
-        gasconstants=8.31446261815324D0
-        avagradosnumber=6.02214076D23
+    IF (.NOT. (found)) THEN
+        !gasconstants=8.31446261815324D0
+        !avagradosnumber=6.02214076D23
         boltzmansconstant=1.38064852D-23
 
         CALL Warn('calculateevaprate',&
@@ -566,8 +567,28 @@ FUNCTION calculateevaprate(Model,n,arguments)Result(evaprate)
     CALL FoundCheck(found, 'evap atomic mass', 'fatal')
 
 
-    evaprate=(alpha*gasconstants*temperature)/(avagradosnumber*&
-        sqrt(2*rpi*mass/avagradosnumber*boltzmansconstant*temperature))
+    !Using the Herz-Knudsen equation h=alpha*(psat-p)*Na/sqrt(2*pi*M_Rb*k*T)
+    !This calculates the prefactor for the (psat-p) term, and then is is used
+    ! in the mass transfer coeficient. Note, we are not calculating mass, but
+    !particle flux
+
+    evaprate=(alpha)/&
+        (sqrt(2*rpi*mass*boltzmansconstant*temperature))
+
+    !Put in a prefactor to convert number density to pressure in pascal
+    !To do this use pressure=(numdensity/loscmidt)*(Temperature/273.15D0)*101375.0D0
+
+    loschmidt=GetConstReal(Model % Constants, 'loschmidts constant', found)
+    CALL FoundCheck(found, 'loschmidts constant' , 'warn')
+    IF (.NOT. found) THEN
+        loschmidt= 2.6867811D25
+    END IF
+
+    prefactor=(temperature/273.15D0)*101375.0D0/loschmidt
+
+    evaprate=prefactor*evaprate
+
+
 
 !---------------------------------------------------------------------------------
 END FUNCTION calculateevaprate
