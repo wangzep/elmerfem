@@ -309,13 +309,14 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
 
     REAL(KIND=dp) :: mixKesp=0, tprime=0, omega=0, sigma=0, Mtot=0
     !------------------------------------------------------------
-    !I believe these are all gotten from Lightfoot, sans the masses
-    REAL(KIND=dp), PARAMETER :: A=1.858D-7, sigmaHe=2.576D0, sigmaXe=4.009D0,&
-        KespHe=10.02D0, KespXe=234.7D0, massXe=131.29D0, massHe=4.003D0
+    !From Lightfoot pg. 526
+    REAL(KIND=dp), PARAMETER :: A=1.8583D-7
+    !From Lightfoot Table E.1 page 864
+    REAL(KIND=dp), PARAMETER ::sigmaHe=2.576D0, sigmaXe=4.009D0,&
+        KespHe=10.02D0, KespXe=234.7D0
+    REAL(KIND=dp), PARAMETER ::massXe=131.29D0, massHe=4.003D0
 
     !------------------------------------------------------------
-
-
 
     !Getting assignments
     Concentration=Argument(1)
@@ -326,18 +327,23 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
     pressure_atm=(Pressure)/101325.0D0
 
     !Actually doing the calcuation.
+    !Lightfoot eq. 17.3-15
     mixKesp=sqrt(KespHe*KespXe)
+    !Lightfoot Table E.2 footnote page 865
     tprime = Temperature/mixKesp
 
+    !Approximation to the collision integral from Lightfoot Table E.2 footnote, page 865.
     omega = (1.06036D0/tprime**(0.15610D0))+(0.19300D0/exp(0.47635D0*tprime))+&
         (1.03587D0/exp(1.52296D0*tprime))+(1.76474D0/exp(3.89411D0*tprime))
 
+    !Lightfoot eq.17.3-14
     sigma = 0.5D0*(sigmaHe+sigmaXe)
 
+    !Lightfoot eq. 17.3-12
     Mtot = sqrt(1/massHe+1/massXe)
 
+    !Light eq. 17.3-12
     D_Xe = (A*Temperature**(3.0D0/2.0D0)*Mtot)/(pressure_atm*omega*sigma**2D0)
-
 
 END FUNCTION CalculateXenonDiffusion
 
