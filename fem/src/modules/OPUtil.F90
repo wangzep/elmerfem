@@ -89,13 +89,13 @@ MODULE OPUtil
             REAL(KIND=dp) :: heatranscoef
         END
 
-        FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscosity)
+        FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscositytot)
             USE DefUtils
             IMPLICIT NONE
             TYPE(Model_t) :: Model
             INTEGER :: n
             REAL(KIND=dp) :: arguments
-            REAL(KIND=dp) :: viscosity
+            REAL(KIND=dp) :: viscositytot
         END
 
         FUNCTION calculateheatcapratio(Model,n,arguments)RESULT(heatcapratio)
@@ -631,18 +631,27 @@ FUNCTION calculateheattransfercoef(Model,n,arguments)RESULT(heatranscoef)
 END FUNCTION calculateheattransfercoef
 !--------------------------------------------------------------------------------
 
-FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscosity)
+FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscositytot)
     USE DefUtils
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
     REAL(KIND=dp) :: arguments(3)
-    REAL(KIND=dp) :: viscosity
+    REAL(KIND=dp) :: viscositytot
     !------------------------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials
     REAL(KIND=dp) :: temperature
     REAL(KIND=dp) :: n2_fraction, xe_fraction, he_fraction
-    REAL(KIND=dp) :: viscosity_xe, viscosity_n2, viscosity_he
+    !From Lightfoot page 26, eq. 1.4-14
+    REAL(KIND=dp), PARAMETER :: A=2.6693D-6
+    !From Lightfoot Table E.1 page 864
+    REAL(KIND=dp), PARAMETER :: sigmaHe=2.576D0, sigmaXe=4.009D0, sigmaN2=3.667D0,&
+        KespHe=10.02D0, KespXe=234.7D0, KespN2=99.8D0
+    REAL(KIND=dp), PARAMETER :: massXe=131.29D0, massHe=4.003D0, massN2=28.0134D0
+    REAL(KIND=dp) :: omega(3), tprime(3), mass(3), Kesp(3), sigma(3), frac(3)
+    REAL(KIND=dp) :: phid(3,3)
+    REAL(KIND=dp) :: viscosity(3), denom
+    INTEGER :: i,j
     LOGICAL :: found
     !------------------------------------------------------------------------------
 
@@ -666,16 +675,47 @@ FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscosity)
             'Gas fractions do not add to 1')
     END IF
 
-    !Calculate the individual viscosities
-    viscosity_n2 = 1.66D0*(273.15D0+111)/(temperature+111.0D0)*(temperature/273.15D0)**(3.0D0/2.0D0)
+    !Make vector assignments in order: (1) He, (2) N2, (3) Xe
+    frac = (/he_fraction,n2_fraction,xe_fraction/)
+    mass = (/massHe,massN2,massXe/)
+    sigma = (/sigmaHe,sigmaN2,sigmaXe/)
+    Kesp = (/KespHe,KespN2, KespXe/)
 
-    viscosity_he = 1.87D0*(273.15D0+79.4)/(temperature+79.4D0)*(temperature/273.15D0)**(3.0D0/2.0D0)
 
-    viscosity_xe = 2.12D0*(273.15D0+252.0D0)/(temperature+252.0D0)*(temperature/273.15D0)**(3.0D0/2.0D0)
+    !Calculate the tprimes and collsion integral, Lightfoot Table E.2 footnote
+    !page 865
+    !Calculate indivual viscosities; Lightfoot eq. 1.4-14
+    DO i = 1,3
+        tprime(i) = temperature/Kesp(i)
+        omega(i)  = 1.16145/tprime(i)**(0.14874D0)+0.52487/EXP(0.77370D0*tprime(i))+&
+            2.16178/EXP(2.43787*tprime(i))
 
-    !Add viscosities
-    viscosity=(he_fraction*viscosity_he**(1.0D0/3.0D0)+n2_fraction*viscosity_n2**(1.0D0/3.0D0)&
-        +xe_fraction*viscosity_xe**(1.0D0/3.0D0))**3.0D0
+        viscosity(i) = A * SQRT(mass(i)*temperature)/((sigma(i)**2)*omega(i))
+    END DO
+
+    !Dimensionaless overlap functions Lightfoot eq. 1.4-16
+    DO i = 1, 3
+        DO j = 1, 3
+            phid(i,j) = (8.0D0)**(-0.5D0)*(1+mass(i)/mass(j))**(-0.5D0)*&
+                (1+(viscosity(i)/viscosity(j))**(0.5D0)*(mass(j)/mass(i))**(0.25D0))**2.0D0
+        END DO
+    END DO
+
+    viscositytot = 0.0D0
+
+    !Lightfoot eq. 1.4-15
+    DO i = 1, 3
+        !instantiate denom as 0
+        denom = 0.0D0
+
+        DO j = 1, 3
+            denom = denom + phid(i,j)*frac(j)
+        END DO
+
+        viscositytot = viscositytot + frac(i)*viscosity(i)/denom
+
+    END DO
+
 
 END FUNCTION calculateviscosity
 
