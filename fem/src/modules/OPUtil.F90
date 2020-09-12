@@ -6,6 +6,35 @@ MODULE OPUtil
 
     INTERFACE
 
+        FUNCTION calculaterbextconc(Model,n,Temperature) RESULT(RbNumDensity_m)
+
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: model
+            INTEGER :: n
+            REAL(KIND=dp) :: Temperature
+            REAL(KIND=dp) :: RbNumDensity_m
+        END
+
+        FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
+            RESULT(SpinDestrucionRate)
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: model
+            INTEGER :: n
+            REAL(KIND=dp) :: argument(3)
+            REAL(KIND=dp) :: SpinDestrucionRate
+        END
+
+        FUNCTION CalculateRbPol(Model,n,argument) RESULT(RbPol)
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: Model
+            REAL(KIND=dp) :: argument(4)
+            INTEGER :: n
+            REAL(KIND=dp) :: RbPol
+        END
+
         FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
             RESULT(SpinExchangeRate)
             USE DefUtils
@@ -116,6 +145,15 @@ MODULE OPUtil
             REAL(KIND=dp) :: cp
         END
 
+        FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
+            USE DefUtils
+            IMPLICIT NONE
+            TYPE(Model_t) :: Model
+            INTEGER :: n
+            REAL(KIND=dp) :: arguments(3)
+            REAL(KIND=dp) :: ktot
+        END
+
         SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
             !------------------------------------------------------------------------------
             USE DefUtils
@@ -131,6 +169,243 @@ MODULE OPUtil
 
     END INTERFACE
 END MODULE
+
+FUNCTION calculaterbextconc(Model,n,Temperature) RESULT(RbNumDensity_m)
+    !-------------------------------------------------------------------------
+    !Calculates Rb number density in m^-3 using Killian equation as presented
+    !in Fink et al. 2005.
+    !n_Rb=10^(9.55-4132/T)/kT
+    !where T is the temperature in Kelvin and k is Boltzman's constant.
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: model
+    INTEGER :: n
+    REAL(KIND=dp) :: Temperature
+    REAL(KIND=dp) :: RbNumDensity_m
+    LOGICAL :: found=.FALSE.
+    !------------------------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials
+    !-----------------------------------------------------------------------
+
+    RbNumDensity_m=(10**(9.55D0-4132.0D0/Temperature))/(1.380648521D-23*Temperature)
+
+
+END FUNCTION calculaterbextconc
+
+FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
+    RESULT(SpinDestrucionRate)
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: model
+    INTEGER :: n
+    REAL(KIND=dp) :: argument(3)
+    REAL(KIND=dp) :: Concentration, Temperature, Pressure, SpinDestrucionRate
+    !----------------------------------------------------------------------
+
+    REAL(KIND=dp) :: alkali_alkali_spin_destruction_rate, xe_spin_destruction_rate,&
+        he_spin_destruction_rate, n2_spin_destruction_rate, G1
+    REAL(KIND=dp) :: xe_fraction, n2_fraction, he_fraction, xe_numberdensity,&
+        he_numberdensity, n2_numberdensity,tot_numberdensity, ref_pressure
+    REAL(KIND=dp) :: loschmidt
+    !-----------------------------------------------------------------
+    INTEGER :: ind
+    !-----------------------------------------------------------------
+    LOGICAL :: convert_density=.FALSE., he_term_included=.FALSE.
+    LOGICAL :: n2_term_included=.FALSE., vanderWall_term_included=.FALSE.
+    LOGICAL :: xe_term_included=.FALSE., local_temperature_used = .FALSE.
+    LOGICAL :: local_pressure_used = .FALSE., found=.FALSE.
+    !--------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials, Constants
+    !--------------------------------------------------------------
+
+
+
+    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
+
+    SpinDestrucionRate = 0.0D0
+
+    Materials => GetMaterial()
+    Constants => GetConstants()
+
+    !!!!!!!!!!!!!!!!!!!Alkali-Alkali Spin Destruction Term!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    alkali_alkali_spin_destruction_rate=&
+        GetConstReal(Materials, 'alkali-alkali spin destruction rate', found)
+    CALL FoundCheck(found, 'alkali-alkali spin destruction rate','fatal')
+
+    ! Assign the Concentration
+    Concentration=argument(1)
+
+    !Check if we should convert the density (we probably do want to
+    convert_density=GetLogical(Materials, 'convert density', found)
+    CALL FoundCheck(found, 'convert density', 'warn')
+
+    !Convert the alkali density to particles/m^3
+    IF (convert_density) THEN
+        Concentration = rb_density_conversion_factor*Concentration
+    END IF
+
+    SpinDestrucionRate=alkali_alkali_spin_destruction_rate*Concentration
+
+    !Inclusion of other terms in the spin-destruction rate: He-Rb, N2-Rb,
+    !and Van der Walls terms
+
+    he_term_included=GetLogical(Materials,&
+        'Helium Spin Destruction Term Included',found)
+
+    n2_term_included = GetLogical(Materials,&
+        'Nitrogen Spin Destruction Term Included',found)
+
+    xe_term_included = GetLogical(Materials,&
+        'Xenon Spin Destruction Term Included',found)
+
+    vanderWall_term_included = GetLogical(Materials,&
+        'vander Wall Spin Destruction Term Included',found)
+
+    IF (he_term_included .OR. n2_term_included .OR. &
+        xe_term_included .OR. vanderWall_term_included) THEN
+
+        !Get the temperature
+
+        Temperature = argument(2)
+
+        IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+            'Temperature variable not found.')
+
+
+        !Get the pressure
+
+        Pressure = argument(3)
+
+        IF (Pressure<0) THEN
+            Pressure = 0
+        END IF
+
+        !Check to make sure we actually found the solution
+
+
+        !        IF (Pressure .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+        !            'Pressure variable not found. Check name of N-S variable.')
+
+
+        !Get the gas fractions
+        xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+        CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+        n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+        CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+        he_fraction = GetConstReal(Materials, 'he fraction', found)
+        CALL FoundCheck(found, 'he fraction', 'fatal')
+
+
+        !Call fatal if the gas fractions don't add to 1
+
+        IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
+            CALL Fatal('GetSpinDestructionRate', &
+                'Gas fractions do not add to 1')
+        END IF
+
+        !Calculate pressure in amagats
+
+        !Get Loschmidt's number if defined in constants
+
+        loschmidt=GetConstReal(Constants, 'loschmidts constant', found)
+        !CALL FoundCheck(found, 'loschmidts constant' , 'warn')
+        IF (.NOT. found) THEN
+            loschmidt= 2.6867811D25
+        END IF
+
+        tot_numberdensity = ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
+
+        xe_numberdensity=tot_numberdensity*xe_fraction
+
+        n2_numberdensity=tot_numberdensity*n2_fraction
+
+        he_numberdensity=tot_numberdensity*he_fraction
+
+        !Implement the xenon contribution to spin destruction rate
+        IF (xe_term_included) THEN
+
+            xe_spin_destruction_rate = 0.0D0
+            xe_spin_destruction_rate = GetConstReal(Materials,&
+                'xe spin destruction rate',found)
+            CALL FoundCheck(found, 'xe spin destruction rate', 'fatal')
+
+            SpinDestrucionRate= SpinDestrucionRate+&
+                xe_spin_destruction_rate*xe_numberdensity
+
+        END IF
+
+        !Implement helium contribution to spin destruction rate
+        IF (he_term_included) THEN
+
+            he_spin_destruction_rate = 0.0D0
+            he_spin_destruction_rate = GetConstReal(Materials,&
+                'he spin destruction rate',found)
+            CALL FoundCheck(found, 'he spin destruction rate', 'fatal')
+
+            SpinDestrucionRate = SpinDestrucionRate+&
+                he_spin_destruction_rate*he_numberdensity
+        END IF
+
+        !Implement N2 contribution to spin destruction rate
+        IF (n2_term_included) THEN
+
+            n2_spin_destruction_rate = 0.0D0
+            n2_spin_destruction_rate = GetConstReal(Materials,&
+                'n2 spin destruction rate',found)
+            CALL FoundCheck(found, 'n2 spin destruction rate', 'fatal')
+
+            SpinDestrucionRate=SpinDestrucionRate+&
+                n2_spin_destruction_rate*n2_numberdensity
+        END IF
+
+        !Implement van der Walls contribution to spin destruction rate
+        !See Nelson's 2001 thesis for details.
+        IF (vanderWall_term_included) THEN
+
+
+            G1 = 0.0D0
+            G1 = GetConstReal(Materials,'short-very short transition density',found)
+            CALL FoundCheck(found, 'short-very short transition density', 'fatal')
+
+            SpinDestrucionRate=SpinDestrucionRate+&
+                (0.385D0+0.642D0*1.0D0/(1.0D0+G1/tot_numberdensity))&
+                *6469.0D0/(xe_fraction+1.1D0*n2_fraction+3.2D0*he_fraction)
+        END IF
+    END IF
+
+END FUNCTION CalculateSpinDestructionRate
+
+FUNCTION CalculateRbPol(Model,n,argument) RESULT(RbPol)
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: argument(4), sdargument(3)
+    REAL(KIND=dp) :: spindestrucionrate, optrate
+    REAL(KIND=dp) :: RbPol
+    REAL(KIND=dp) :: CalculateSpinDestructionRate
+    !--------------------------------------------------------------------------------
+
+    optrate=argument(1)
+
+    sdargument= (/argument(2),argument(3),argument(4)/)
+
+    spindestrucionrate=CalculateSpinDestructionRate(Model, n, sdargument)
+
+    RbPol=optrate/(optrate+spindestrucionrate)
+
+    IF (RbPol>1) THEN
+        RbPol=1
+    END IF
+
+    IF (RbPol<0) THEN
+        RbPol=0
+    END IF
+
+END FUNCTION CalculateRbPol
 
 FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     RESULT(SpinExchangeRate)
@@ -485,14 +760,17 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     IMPLICIT NONE
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: arguments(3)
+    REAL(KIND=dp) :: arguments(4), sdargument(3)
     REAL(KIND=dp) :: heating
     !------------------------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials, Constants
     REAL(KIND=dp) :: laser_wavelength, speed_of_light, plank_constant,&
         concentration, spin_destruction_rate, alkali_polarization,&
         laser_frequency
+    REAL(KIND=dp) :: CalculateSpinDestructionRate, CalculateRbPol
     LOGICAL :: found, found1, found2
+
+    sdargument= (/arguments(2),arguments(3),arguments(4)/)
 
     Materials=>GetMaterial()
     Constants=>GetConstants()
@@ -503,8 +781,16 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     spin_destruction_rate = GetConstReal(Materials, 'spin destruction rate',found)
     CALL FoundCheck(found, 'spin destruction rate', 'fatal')
 
+    IF (spin_destruction_rate .EQ. 0) THEN
+        spin_destruction_rate=CalculateSpinDestructionRate(Model, n, sdargument)
+    END IF
+
     alkali_polarization = GetConstReal(Materials, 'alkali polarization',found)
     CALL FoundCheck(found, 'alkali polarization', 'fatal')
+
+    IF (alkali_polarization .EQ. 0) THEN
+        alkali_polarization=CalculateRbPol(Model, n, arguments)
+    END IF
 
     plank_constant = GetConstReal(Constants, 'planks constant',found1)
     speed_of_light = GetConstReal(Constants,'speed of light',found2)
@@ -518,7 +804,7 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
             'One or more of the constants are not listed in the SIF. Using default values SI units.')
     END IF
 
-    concentration=arguments(1)
+    concentration=arguments(2)
 
     laser_frequency = speed_of_light/laser_wavelength
 
@@ -731,6 +1017,7 @@ FUNCTION calculateheatcapratio(Model,n,arguments)RESULT(heatcapratio)
     !-----------------------------------------------------------------
     TYPE(ValueList_t), POINTER :: Materials
     REAL(KIND=dp) :: n2_fraction, xe_fraction, he_fraction
+    REAL(KIND=dp) :: avgmolarmass, xemassfrac, n2massfrac, hemassfrac
     LOGICAL :: found
     !------------------------------------------------------------------------------
 
@@ -752,7 +1039,14 @@ FUNCTION calculateheatcapratio(Model,n,arguments)RESULT(heatcapratio)
             'Gas fractions do not add to 1')
     END IF
 
-    heatcapratio=5.0D0/3.0D0*(xe_fraction+he_fraction)+7.0D0/5.0D0*n2_fraction
+    avgmolarmass = xe_fraction*131.293D0+n2_fraction*28.0134D0+he_fraction*4.002602D0
+
+    xemassfrac = xe_fraction*131.293D0/avgmolarmass
+    n2massfrac = n2_fraction*28.0134D0/avgmolarmass
+    hemassfrac = he_fraction*4.0026202D0/avgmolarmass
+
+    heatcapratio=(5.0D0/2.0D0*(xemassfrac+hemassfrac)+7.0D0/2.0D0*n2massfrac)/&
+        (3.0D0/2.0D0*(xemassfrac+hemassfrac)+5.0D0/2.0D0*n2massfrac)
 
 END FUNCTION calculateheatcapratio
 
@@ -799,6 +1093,96 @@ FUNCTION calculatecp(Model,n,arguments)RESULT(cp)
 
     cp = xemassfrac*158.31D0+n2massfrac*1039.67D0+5196.118D0*hemassfrac
 END FUNCTION calculatecp
+
+FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
+    USE DefUtils
+    IMPLICIT NONE
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: arguments(3)
+    REAL(KIND=dp) :: ktot
+    !------------------------------------------------------------------------------
+    TYPE(ValueList_t), POINTER :: Materials
+    REAL(KIND=dp) :: temperature
+    REAL(KIND=dp) :: n2_fraction, xe_fraction, he_fraction
+    !From Lightfoot page 26, eq. 9.3-13, modified to go from cal/(cm*s*K) to W/(m*K)
+    !1 cal/(s*cm*K)=418.4 W/(m*K). So 1.9891e-4*418.4 = 0.083223944
+    REAL(KIND=dp), PARAMETER :: A=0.083223944
+    !From Lightfoot Table E.1 page 864
+    REAL(KIND=dp), PARAMETER :: sigmaHe=2.576D0, sigmaXe=4.009D0, sigmaN2=3.667D0,&
+        KespHe=10.02D0, KespXe=234.7D0, KespN2=99.8D0
+    REAL(KIND=dp), PARAMETER :: massXe=131.29D0, massHe=4.003D0, massN2=28.0134D0
+    REAL(KIND=dp) :: omega(3), tprime(3), mass(3), Kesp(3), sigma(3), frac(3)
+    REAL(KIND=dp) :: phid(3,3)
+    REAL(KIND=dp) :: k(3), denom
+    INTEGER :: i,j
+    LOGICAL :: found
+    !------------------------------------------------------------------------------
+
+    temperature = arguments(3)
+
+    Materials=>GetMaterial()
+
+    xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+    CALL FoundCheck(found, 'xe fraction', 'fatal')
+
+    n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+    CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+
+    he_fraction = GetConstReal(Materials, 'he fraction', found)
+    CALL FoundCheck(found, 'he fraction', 'fatal')
+
+    !Call fatal if the gas fractions don't add to 1
+
+    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
+        CALL Fatal('GetSpinDestructionRate', &
+            'Gas fractions do not add to 1')
+    END IF
+
+    !Make vector assignments in order: (1) He, (2) N2, (3) Xe
+    frac = (/he_fraction,n2_fraction,xe_fraction/)
+    mass = (/massHe,massN2,massXe/)
+    sigma = (/sigmaHe,sigmaN2,sigmaXe/)
+    Kesp = (/KespHe,KespN2, KespXe/)
+
+
+    !Calculate the tprimes and collsion integral, Lightfoot Table E.2 footnote
+    !page 865
+    !Calculate indivual viscosities; Lightfoot eq. 9.3-13
+    DO i = 1,3
+        tprime(i) = temperature/Kesp(i)
+        omega(i)  = 1.16145/tprime(i)**(0.14874D0)+0.52487/EXP(0.77370D0*tprime(i))+&
+            2.16178/EXP(2.43787*tprime(i))
+
+        k(i) = A * SQRT(temperature/mass(i))/((sigma(i)**2)*omega(i))
+    END DO
+
+    !Dimensionaless overlap functions Lightfoot eq. 9.3-17
+    DO i = 1, 3
+        DO j = 1, 3
+            phid(i,j) = (8.0D0)**(-0.5D0)*(1+mass(i)/mass(j))**(-0.5D0)*&
+                (1+(k(i)/k(j))**(0.5D0)*(mass(j)/mass(i))**(0.25D0))**2.0D0
+        END DO
+    END DO
+
+    ktot = 0.0D0
+
+    !Lightfoot eq. 1.4-15
+    DO i = 1, 3
+        !instantiate denom as 0
+        denom = 0.0D0
+
+        DO j = 1, 3
+            denom = denom + phid(i,j)*frac(j)
+        END DO
+
+        ktot = ktot + frac(i)*k(i)/denom
+
+    END DO
+
+
+END FUNCTION calculatethermalconductivity
+
 
 SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
     !------------------------------------------------------------------------------

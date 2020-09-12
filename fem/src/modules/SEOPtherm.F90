@@ -17,12 +17,12 @@ FUNCTION SEOPtherm(Model, n, temperature) RESULT(k)
     !------------------------------------------------------------------------!
     REAL(KIND=dp) :: N2Frac, XeFrac
     REAL(KIND=dp) :: thermcoef, massHe, massXe, massN2, sigmaHe, sigmaN2, &
-                     sigmaXe, k_espHe,k_espN2,k_espXe
+        sigmaXe, k_espHe,k_espN2,k_espXe
     REAL(KIND=dp) :: temperature
     REAL(KIND=dp) :: kHe, kN2, kXe
     REAL(KIND=dp) :: omega,tempprime
     REAL(KIND=dp) :: kcomp(3),mass(3),psi(3,3),xfrac(3),denominator, frontcoef,&
-                     middlebit, lastbit
+        middlebit, lastbit
     REAL(KIND=dp) :: k
     INTEGER :: ind,jnd
     LOGICAL :: FLAG, Found
@@ -81,30 +81,30 @@ FUNCTION SEOPtherm(Model, n, temperature) RESULT(k)
     !it is easier to keep track of the parantheses.
     DO ind=1,3
     
-    DO jnd=1,3
+        DO jnd=1,3
 
-    middlebit=(1.0+mass(ind)/mass(jnd))**(-0.5)
+            middlebit=(1.0+mass(ind)/mass(jnd))**(-0.5)
 
-    lastbit=(1.0+(kcomp(ind)/kcomp(jnd))**(0.5)*(mass(jnd)/mass(ind))**(0.25))**(2)
+            lastbit=(1.0+(kcomp(ind)/kcomp(jnd))**(0.5)*(mass(jnd)/mass(ind))**(0.25))**(2)
 
-    psi(ind,jnd)=frontcoef*middlebit*lastbit
+            psi(ind,jnd)=frontcoef*middlebit*lastbit
 	
-    END DO
+        END DO
     
     END DO
 
     !Now do the actual sum
     DO ind=1,3
     
-    denominator=0d0
+        denominator=0d0
     
-    DO jnd=1,3
+        DO jnd=1,3
     
-    denominator=denominator+xfrac(jnd)*psi(ind,jnd)
+            denominator=denominator+xfrac(jnd)*psi(ind,jnd)
     
-    END DO
+        END DO
 
-    k=k+xfrac(ind)*kcomp(ind)/denominator
+        k=k+xfrac(ind)*kcomp(ind)/denominator
 
     END DO
     !k is in cal/(cm*s*C) and it needs to be in W/(m*K).
@@ -130,6 +130,6 @@ SUBROUTINE OMEGACALC(temperature, k_esp, omega)
 	
     tempprime=temperature/k_esp
     omega=1.16145/tempprime**(0.14874) + 0.52487/exp(0.77320*tempprime) +&
-    2.16178/exp(2.43787*tempprime)
+        2.16178/exp(2.43787*tempprime)
 END SUBROUTINE
 
