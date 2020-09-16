@@ -51,7 +51,7 @@ MODULE OPUtil
             IMPLICIT None
             TYPE(Model_t) :: Model
             INTEGER :: n
-            REAL(KIND=dp) :: Argument(2)
+            REAL(KIND=dp) :: Argument(3)
             REAL(KIND=dp) :: SpinRelaxationRate
         END
 
@@ -69,7 +69,7 @@ MODULE OPUtil
             IMPLICIT None
             TYPE(Model_t) :: Model
             INTEGER :: n
-            REAL(KIND=dp) :: Argument(2)
+            REAL(KIND=dp) :: Argument(3)
             REAL(KIND=dp) :: D_Xe
         END
 
@@ -267,7 +267,7 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
 
         !Get the temperature
 
-        Temperature = argument(2)
+        Temperature = argument(3)
 
         IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
             'Temperature variable not found.')
@@ -275,7 +275,15 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
 
         !Get the pressure
 
-        Pressure = argument(3)
+        Pressure = argument(2)
+
+        !Get Reference Pressure
+
+        ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
+
+        IF (found) THEN
+            Pressure=ref_pressure+Pressure
+        END IF
 
         IF (Pressure<0) THEN
             Pressure = 0
@@ -311,7 +319,7 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
         !Get Loschmidt's number if defined in constants
 
         loschmidt=GetConstReal(Constants, 'loschmidts constant', found)
-        !CALL FoundCheck(found, 'loschmidts constant' , 'warn')
+        CALL FoundCheck(found, 'loschmidts constant' , 'warn')
         IF (.NOT. found) THEN
             loschmidt= 2.6867811D25
         END IF
@@ -419,10 +427,15 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     REAL(KIND=dp) :: SpinExchangeRate
     REAL(KIND=dp) :: binaryexchangerate, xemolcrate, n2molcrate, hemolcrate
     REAL(KIND=dp) :: xe_fraction,n2_fraction, he_fraction, loschmidt,&
-        tot_numberdensity, xe_numberdensity, n2_numberdensity, he_numberdensity
+        tot_numberdensity, xe_numberdensity, n2_numberdensity, he_numberdensity,&
+        ref_pressure
     TYPE(ValueList_t), POINTER :: Materials, Constants
     LOGICAL :: found
-    !-----------------------------------------------------------
+        !-----------------------------------------------------------
+
+
+    Constants=>GetConstants()
+    Materials=>GetMaterial()
 
     !Eventaully I might import more terms, so this is anticpating that eventuallity
     Concentration=Argument(1)
@@ -435,9 +448,17 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
 
     Pressure=Argument(2)
 
-    Constants=>GetConstants()
-    Materials=>GetMaterial()
+        !Get Reference Pressure
 
+    ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
+
+    IF (found) THEN
+        Pressure=ref_pressure+Pressure
+    END IF
+
+    IF (Pressure<0) THEN
+        Pressure = 0
+    END IF
 
     !Binary component
     binaryexchangerate=GetConstReal(Materials, 'binary exchange rate', found)
@@ -511,7 +532,7 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     INTEGER :: n
     REAL(KIND=dp) :: Argument(3)
     REAL(KIND=dp) :: Concentration,Pressure,Temperature
-    REAL(KIND=dp) :: he_fraction=0, xe_fraction=0, n2_fraction=0
+    REAL(KIND=dp) :: he_fraction=0, xe_fraction=0, n2_fraction=0, ref_pressure
     REAL(KIND=dp) :: he_ratio_term, n2_ratio_term, xe_vdW_term, xe_binary,&
         loschmidt
     REAL(KIND=dp) :: SpinRelaxationRate
@@ -524,6 +545,19 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
 
     Concentration=Argument(1)
     Pressure=Argument(2)
+
+        !Get Reference Pressure
+
+    ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
+
+    IF (found) THEN
+        Pressure=ref_pressure+Pressure
+    END IF
+
+    IF (Pressure<0) THEN
+        Pressure = 0
+    END IF
+
     Temperature=Argument(3)
 
     xe_fraction=GetConstReal(Materials, 'xe fraction', found)
@@ -580,7 +614,7 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
     REAL(KIND=dp) :: D_Xe
     !-------------------------------------------------------
     REAL(KIND=dp) :: Concentration,Pressure,Temperature
-    REAL(KIND=dp) :: pressure_atm=0
+    REAL(KIND=dp) :: pressure_atm=0, ref_pressure
 
     REAL(KIND=dp) :: mixKesp=0, tprime=0, omega=0, sigma=0, Mtot=0
     !------------------------------------------------------------
@@ -590,12 +624,45 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
     REAL(KIND=dp), PARAMETER ::sigmaHe=2.576D0, sigmaXe=4.009D0,&
         KespHe=10.02D0, KespXe=234.7D0
     REAL(KIND=dp), PARAMETER ::massXe=131.29D0, massHe=4.003D0
-
+    TYPE(ValueList_t), POINTER :: Materials
+    LOGICAL :: found, isT1
     !------------------------------------------------------------
 
     !Getting assignments
     Concentration=Argument(1)
     Pressure=Argument(2)
+
+    !Get Reference Pressure, but only if we can find the "Materials" Section.
+    !We usually can't find the materials section if we have a call from
+    !CalculateDecayRate, because that only acts on the boundary.
+    !Because of that, the Materials section in inaccessible to
+    !the program will CalculateDecayRate calls it.
+    !The way this is handled is a little hokey. I'm using the n
+    ! interger which Elmer's main program use to keep track of
+    !element number. However, when I make the call
+    !from  CalculateDecayRate, I call it using
+    !CalculateXenonDiffusion(Module, -1, arguements).
+    !The logic below then doesn't activate
+    !For normal operation, n is always greather than 0
+    !It would be great to come up with another way to do this
+    !that is a bit more robust.
+
+
+    IF (n .GT. 0) THEN
+        Materials=>GetMaterial()
+        ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
+
+        IF (found) THEN
+            Pressure=ref_pressure+Pressure
+        END IF
+    END IF
+
+    IF (Pressure<0) THEN
+        Pressure = 0
+    END IF
+
+
+
     Temperature=Argument(3)
 
     !Convert to atm
@@ -660,7 +727,12 @@ FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
 
     T1vals = (/dumb,pressureT1,temperatureT1/)
 
-    initialD_Xe=CalculateXenonDiffusion(Model, 1, T1vals)
+    !The -1 as an argument is important because it makes it so the program
+    !doesn't look for the Materials section in the CalculateXenonDiffusion
+    !function. This is a really bad way to do it, and it needs to be fixed
+    !at some point. This is a really non-robust way to do it.
+
+    initialD_Xe=CalculateXenonDiffusion(Model, -1, T1vals)
 
     !Check to make sure that we are longer than the minumum T1
 
@@ -837,6 +909,12 @@ FUNCTION calculateevaprate(Model,n,arguments)Result(evaprate)
     Constants=> GetConstants()
 
     temperature=arguments(3)
+
+    !Adjust to keep below boiling point of Rb.
+
+    IF (temperature .GT. 960) THEN
+        temperature = 960
+    END IF
 
     !Gas constant and avagrdos number are not used in this formulation
     !gasconstants=GetConstReal(Constants, 'gas constant', found1)

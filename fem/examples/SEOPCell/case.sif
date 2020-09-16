@@ -50,7 +50,7 @@ Material 1
   !spin destruction rate = Real 3
   !spin destruction rate = Real 2.1D4
   !Spin Destruction Terms!
-  spin destruction rate = Variable Concentration, Temperature, Pressure; Real Procedure "OPSolver" "CalculateSpinDestructionRate"
+  spin destruction rate = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateSpinDestructionRate"
  
   alkali-alkali spin destruction rate = Real 3.9e-20!Fink et al. 2005
   xe spin destruction rate = Real 9.08e-21 !Nelson 2001
@@ -58,7 +58,7 @@ Material 1
   he spin destruction rate = Real 2e-24!Fink et al. 2005
   short-very short transition density = Real 7.2577554e-26 !Nelson 2001
 
-  alkali polarization = Variable optrate, Concentration, Temperature, Pressure; Real Procedure "OPSolver" "CalculateRbPol"
+  alkali polarization = Variable optrate, Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateRbPol"
 
   Helium Spin Destruction Term Included= LOGICAL False
   Nitrogen Spin Destruction Term Included = LOGICAL False
