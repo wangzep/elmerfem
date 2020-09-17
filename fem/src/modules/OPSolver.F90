@@ -279,11 +279,13 @@ CONTAINS
             !Assure that the temp term is positive and if not
             !Make it a small positive number
 
-!            DO ind = 1, n
-!                IF (temp(ind) .LT. 1D-8) THEN
-!                    temp(ind)=1D-8
-!                END IF
-!            END DO
+            DO ind = 1, n
+                IF (temp(ind) .LT. 1D-8) THEN
+                    temp(ind)=1D-8
+                    CALL WARN('OPSolver',&
+                     'Derivative of oprate is greater than 0, reset to 0')
+                END IF
+            END DO
 
             temp=alkali_density*temp
             temp=beta*temp
