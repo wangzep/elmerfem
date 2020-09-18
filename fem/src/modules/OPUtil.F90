@@ -73,6 +73,16 @@ MODULE OPUtil
             REAL(KIND=dp) :: D_Xe
         END
 
+        FUNCTION CalculateRubidiumDiffusion(Model,n,Argument) RESULT(D_Rb)
+            !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
+            USE DefUtils
+            IMPLICIT None
+            TYPE(Model_t) :: Model
+            INTEGER :: n
+            REAL(KIND=dp) :: Argument(3)
+            REAL(KIND=dp) :: D_Rb
+        END
+
         FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
             USE DefUtils
             IMPLICIT None
@@ -665,6 +675,60 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
     D_Xe=CalculateDiffusion(Concentration, Pressure, Temperature,&
         massHe, massXe, sigmaHe, sigmaXe, KespHe, KespXe)
 END FUNCTION CalculateXenonDiffusion
+
+FUNCTION CalculateRubidiumDiffusion(Model,n,Argument) RESULT(D_Rb)
+    !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
+    USE DefUtils
+    IMPLICIT None
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: Argument(3)
+    REAL(KIND=dp) :: D_Rb
+    !-------------------------------------------------------
+    REAL(KIND=dp) :: Concentration,Pressure,Temperature
+    REAL(KIND=dp) :: ref_pressure
+    !------------------------------------------------------------
+    !From Lightfoot Table E.1 page 864 and
+    !JOURNAL OF RESEARCH of the National Bureau of Stondards Vol. 84, No.6,
+    !November- December 1979, Mountain and Haan for the Lenard-Jones parameters of Rb
+    REAL(KIND=dp), PARAMETER ::sigmaHe=2.576D0, sigmaRb=4.48D0,&
+        KespHe=10.02D0, KespRb=383D0
+    REAL(KIND=dp), PARAMETER ::massRb=85.4678D0, massHe=4.003D0
+    REAL(KIND=dp) :: CalculateDiffusion
+    TYPE(ValueList_t), POINTER :: Materials
+    LOGICAL :: found
+    !------------------------------------------------------------
+
+    !Getting assignments
+    Concentration=Argument(1)
+    Pressure=Argument(2)
+
+    !Get the refeerence pressure for Perfect Gas compressibility
+    !model runs.
+    Materials=>GetMaterial()
+    ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
+
+    IF (ref_pressure .lt. 0) THEN
+        CALL Fatal('CalculateXenonDiffusion',&
+            'Reference Pressure is less than 0')
+    END IF
+
+    IF (found) THEN
+        Pressure=ref_pressure+Pressure
+    END IF
+
+    !Fix the pressure if it is wrong
+    IF (Pressure<0) THEN
+        Pressure = 0
+        CALL Warn('CalculateXenonDiffusion',&
+            'Pressure was less than 0, reset to 0.')
+    END IF
+    !Get temperature assignment
+    Temperature=Argument(3)
+
+    D_Rb=CalculateDiffusion(Concentration, Pressure, Temperature,&
+        massHe, massRb, sigmaHe, sigmaRb, KespHe, KespRb)
+END FUNCTION CalculateRubidiumDiffusion
 
 FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
 
