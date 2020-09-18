@@ -154,6 +154,16 @@ MODULE OPUtil
             REAL(KIND=dp) :: ktot
         END
 
+        FUNCTION CalculateDiffusion(Concentration, Pressure, Temperature,&
+            mass1, mass2, sigma1,sigma2, Kesp1, Kesp2) RESULT(diffusioncoef)
+            !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
+            USE DefUtils
+            IMPLICIT None
+            REAL(KIND=dp) :: diffusioncoef
+            REAL(KIND=dp) :: Concentration,Pressure,Temperature
+            REAL(KIND=dp) :: mass1, mass2, sigma1, sigma2, Kesp1,Kesp2
+        END
+
         SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
             !------------------------------------------------------------------------------
             USE DefUtils
@@ -614,79 +624,46 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
     REAL(KIND=dp) :: D_Xe
     !-------------------------------------------------------
     REAL(KIND=dp) :: Concentration,Pressure,Temperature
-    REAL(KIND=dp) :: pressure_atm=0, ref_pressure
-
-    REAL(KIND=dp) :: mixKesp=0, tprime=0, omega=0, sigma=0, Mtot=0
+    REAL(KIND=dp) :: ref_pressure
     !------------------------------------------------------------
-    !From Lightfoot pg. 526
-    REAL(KIND=dp), PARAMETER :: A=1.8583D-7
     !From Lightfoot Table E.1 page 864
     REAL(KIND=dp), PARAMETER ::sigmaHe=2.576D0, sigmaXe=4.009D0,&
         KespHe=10.02D0, KespXe=234.7D0
     REAL(KIND=dp), PARAMETER ::massXe=131.29D0, massHe=4.003D0
+    REAL(KIND=dp) :: CalculateDiffusion
     TYPE(ValueList_t), POINTER :: Materials
-    LOGICAL :: found, isT1
+    LOGICAL :: found
     !------------------------------------------------------------
 
     !Getting assignments
     Concentration=Argument(1)
     Pressure=Argument(2)
 
-    !Get Reference Pressure, but only if we can find the "Materials" Section.
-    !We usually can't find the materials section if we have a call from
-    !CalculateDecayRate, because that only acts on the boundary.
-    !Because of that, the Materials section in inaccessible to
-    !the program will CalculateDecayRate calls it.
-    !The way this is handled is a little hokey. I'm using the n
-    ! interger which Elmer's main program use to keep track of
-    !element number. However, when I make the call
-    !from  CalculateDecayRate, I call it using
-    !CalculateXenonDiffusion(Module, -1, arguements).
-    !The logic below then doesn't activate
-    !For normal operation, n is always greather than 0
-    !It would be great to come up with another way to do this
-    !that is a bit more robust.
+    !Get the refeerence pressure for Perfect Gas compressibility
+    !model runs.
+    Materials=>GetMaterial()
+    ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
 
-
-    IF (n .GT. 0) THEN
-        Materials=>GetMaterial()
-        ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
-
-        IF (found) THEN
-            Pressure=ref_pressure+Pressure
-        END IF
+    IF (ref_pressure .lt. 0) THEN
+        CALL Fatal('CalculateXenonDiffusion',&
+            'Reference Pressure is less than 0')
     END IF
 
+    IF (found) THEN
+        Pressure=ref_pressure+Pressure
+    END IF
+
+    !Fix the pressure if it is wrong
     IF (Pressure<0) THEN
         Pressure = 0
+        CALL Warn('CalculateXenonDiffusion',&
+            'Pressure was less than 0, reset to 0.')
     END IF
-
-
-
+    !Get temperature assignment
     Temperature=Argument(3)
 
-    !Convert to atm
-    pressure_atm=(Pressure)/101325.0D0
-
-    !Actually doing the calcuation.
-    !Lightfoot eq. 17.3-15
-    mixKesp=sqrt(KespHe*KespXe)
-    !Lightfoot Table E.2 footnote page 865
-    tprime = Temperature/mixKesp
-
-    !Approximation to the collision integral from Lightfoot Table E.2 footnote, page 865.
-    omega = (1.06036D0/tprime**(0.15610D0))+(0.19300D0/exp(0.47635D0*tprime))+&
-        (1.03587D0/exp(1.52296D0*tprime))+(1.76474D0/exp(3.89411D0*tprime))
-
-    !Lightfoot eq.17.3-14
-    sigma = 0.5D0*(sigmaHe+sigmaXe)
-
-    !Lightfoot eq. 17.3-12
-    Mtot = sqrt(1/massHe+1/massXe)
-
-    !Light eq. 17.3-12
-    D_Xe = (A*Temperature**(3.0D0/2.0D0)*Mtot)/(pressure_atm*omega*sigma**2D0)
-
+    D_Xe=CalculateDiffusion(Concentration, Pressure, Temperature,&
+        massHe, massXe, sigmaHe, sigmaXe, KespHe, KespXe)
 END FUNCTION CalculateXenonDiffusion
 
 FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
@@ -695,15 +672,18 @@ FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
     IMPLICIT None
     TYPE(Model_t) :: Model
     INTEGER :: n
-    REAL(KIND=dp) :: argument(3)
-    REAL(KIND=dp) :: concentration,pressure, temperature
+    REAL(KIND=dp) :: argument(3)!Dummy for Elmer, doesn't actually do anything.
     REAL(KIND=dp) :: decayrate
     !--------------------------------------------
     REAL(KIND=dp) :: cell_radius=0, cellT1=0,&
         pressureT1=0, temperatureT1=0, T1vals(3), minT1, rpi,&
         dumb=0
-    REAL(KIND=SELECTED_REAL_KIND(12)) :: initialD_Xe=0, CalculateXenonDiffusion
-
+    !--------------------------------------------
+            !From Lightfoot Table E.1 page 864
+    REAL(KIND=dp), PARAMETER ::sigmaHe=2.576D0, sigmaXe=4.009D0,&
+        KespHe=10.02D0, KespXe=234.7D0
+    REAL(KIND=dp), PARAMETER ::massXe=131.29D0, massHe=4.003D0
+    REAL(KIND=dp) :: initialD_Xe=0, CalculateDiffusion
     TYPE(ValueList_t), POINTER :: Constants
 
     LOGICAL :: found, check
@@ -725,16 +705,11 @@ FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
     temperatureT1=GetConstReal(Constants, 'T1 Temperature', found)
     CALL FoundCheck(found, 'T1 Temperature', 'fatal')
 
-    T1vals = (/dumb,pressureT1,temperatureT1/)
-
-    !The -1 as an argument is important because it makes it so the program
-    !doesn't look for the Materials section in the CalculateXenonDiffusion
-    !function. This is a really bad way to do it, and it needs to be fixed
-    !at some point. This is a really non-robust way to do it.
-
-    initialD_Xe=CalculateXenonDiffusion(Model, -1, T1vals)
+    initialD_Xe=CalculateDiffusion(dumb, pressureT1, temperatureT1,&
+        massHe, massXe, sigmaHe, sigmaXe, KespHe, KespXe)
 
     !Check to make sure that we are longer than the minumum T1
+    !See https://arxiv.org/abs/1911.01574 for this equation.
 
     minT1 = cell_radius**2.0D0/((rpi**2.0D0)*initialD_Xe)
 
@@ -742,6 +717,7 @@ FUNCTION CalculateDecayRate(Model,n,argument) RESULT(decayrate)
 
     IF (check) THEN
 
+        !See https://arxiv.org/abs/1911.01574 for this equation.
         decayrate=(initialD_Xe/cell_radius)*(1-(cell_radius/sqrt(initialD_Xe*cellT1))/&
             TAN(cell_radius/sqrt(initialD_Xe*cellT1)))
 
@@ -1260,6 +1236,46 @@ FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
 
 
 END FUNCTION calculatethermalconductivity
+
+FUNCTION CalculateDiffusion(Concentration, Pressure, Temperature,&
+    mass1, mass2, sigma1,sigma2, Kesp1, Kesp2) RESULT(diffusioncoef)
+    !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
+    USE DefUtils
+    IMPLICIT None
+    REAL(KIND=dp) :: diffusioncoef
+    REAL(KIND=dp) :: Concentration,Pressure,Temperature
+    REAL(KIND=dp) :: mass1, mass2, sigma1, sigma2, Kesp1,Kesp2
+    !------------------------------------------------------------------------
+    REAL(KIND=dp) :: pressure_atm=0
+
+    REAL(KIND=dp) :: mixKesp=0, tprime=0, omega=0, sigma=0, Mtot=0
+    !------------------------------------------------------------
+    !From Lightfoot pg. 526
+    REAL(KIND=dp), PARAMETER :: A=1.8583D-7
+    !------------------------------------------------------------
+    !Convert to atm
+    pressure_atm=(Pressure)/101325.0D0
+
+    !Actually doing the calcuation.
+    !Lightfoot eq. 17.3-15
+    mixKesp=sqrt(Kesp1*Kesp2)
+    !Lightfoot Table E.2 footnote page 865
+    tprime = Temperature/mixKesp
+
+    !Approximation to the collision integral from Lightfoot Table E.2 footnote, page 865.
+    omega = (1.06036D0/tprime**(0.15610D0))+(0.19300D0/exp(0.47635D0*tprime))+&
+        (1.03587D0/exp(1.52296D0*tprime))+(1.76474D0/exp(3.89411D0*tprime))
+
+    !Lightfoot eq.17.3-14
+    sigma = 0.5D0*(sigma1+sigma2)
+
+    !Lightfoot eq. 17.3-12
+    Mtot = sqrt(1/mass1+1/mass2)
+
+    !Light eq. 17.3-12
+    diffusioncoef = (A*Temperature**(3.0D0/2.0D0)*Mtot)/(pressure_atm*omega*sigma**2D0)
+
+END FUNCTION CalculateDiffusion
 
 
 SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
