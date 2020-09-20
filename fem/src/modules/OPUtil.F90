@@ -174,6 +174,21 @@ MODULE OPUtil
             REAL(KIND=dp) :: mass1, mass2, sigma1, sigma2, Kesp1,Kesp2
         END
 
+        SUBROUTINE ArgumentCheck(Concentration, Pressure, Temperature, Caller)
+            USE defutils
+
+            IMPLICIT NONE
+            REAL(KIND=dp), INTENT(IN) :: Concentration, Pressure, Temperature
+            CHARACTER(len=*), INTENT(IN) :: Caller
+        END
+
+        SUBROUTINE GasFracCheck(xe_fraction, he_fraction, n2_fraction)
+            USE defutils
+
+            IMPLICIT NONE
+            REAL(KIND=dp), INTENT(IN) :: xe_fraction, he_fraction, n2_fraction
+        END
+
         SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
             !------------------------------------------------------------------------------
             USE DefUtils
@@ -207,8 +222,17 @@ FUNCTION calculaterbextconc(Model,n,Temperature) RESULT(RbNumDensity_m)
     TYPE(ValueList_t), POINTER :: Materials
     !-----------------------------------------------------------------------
 
+    IF (Temperature .lt. 0) THEN
+        CALL Fatal('calculaterbextconc',&
+            'Temperature is less than 0, this is not physically possible')
+    END IF
+
     RbNumDensity_m=(10**(9.55D0-4132.0D0/Temperature))/(1.380648521D-23*Temperature)
 
+    IF (RbNumDensity_m .lt. 0) THEN
+        CALL Fatal('calculaterbextconc',&
+            'Calculated Rb Number Density is less than 0, this is not physically possible')
+    END IF
 
 END FUNCTION calculaterbextconc
 
@@ -238,10 +262,6 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
     TYPE(ValueList_t), POINTER :: Materials, Constants
     !--------------------------------------------------------------
 
-
-
-    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
-
     SpinDestrucionRate = 0.0D0
 
     Materials => GetMaterial()
@@ -253,17 +273,27 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
         GetConstReal(Materials, 'alkali-alkali spin destruction rate', found)
     CALL FoundCheck(found, 'alkali-alkali spin destruction rate','fatal')
 
+
+    IF (alkali_alkali_spin_destruction_rate .lt. 0) THEN
+        CALL Fatal('OPUtil', 'Alkali-alkali spin destruction rate is less than 0')
+    END IF
+
     ! Assign the Concentration
     Concentration=argument(1)
 
-    !Check if we should convert the density (we probably do want to
-    convert_density=GetLogical(Materials, 'convert density', found)
-    CALL FoundCheck(found, 'convert density', 'warn')
-
-    !Convert the alkali density to particles/m^3
-    IF (convert_density) THEN
-        Concentration = rb_density_conversion_factor*Concentration
+    IF (Concentration .lt. 0) THEN
+        CALL Fatal('CalculateSpinDestructionRate',&
+            'alkali concentration is less that 0, that is not physical.')
     END IF
+
+    !    !Check if we should convert the density (we probably do want to
+    !    convert_density=GetLogical(Materials, 'convert density', found)
+    !    CALL FoundCheck(found, 'convert density', 'warn')
+    !
+    !    !Convert the alkali density to particles/m^3
+    !    IF (convert_density) THEN
+    !        Concentration = rb_density_conversion_factor*Concentration
+    !    END IF
 
     SpinDestrucionRate=alkali_alkali_spin_destruction_rate*Concentration
 
@@ -289,8 +319,8 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
 
         Temperature = argument(3)
 
-        IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
-            'Temperature variable not found.')
+        IF (Temperature .lt. 0) Call Fatal('GetSpinDestructionRate',&
+            'Temperature is less than zero, that is not physical.')
 
 
         !Get the pressure
@@ -305,9 +335,9 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
             Pressure=ref_pressure+Pressure
         END IF
 
-        IF (Pressure<0) THEN
-            Pressure = 0
-        END IF
+
+        IF (Pressure .lt. 0) Call Fatal('GetSpinDestructionRate',&
+            'Pressure is less than zero, that is not physical.')
 
         !Check to make sure we actually found the solution
 
@@ -326,13 +356,8 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
         he_fraction = GetConstReal(Materials, 'he fraction', found)
         CALL FoundCheck(found, 'he fraction', 'fatal')
 
+        CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
-        !Call fatal if the gas fractions don't add to 1
-
-        IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-            CALL Fatal('GetSpinDestructionRate', &
-                'Gas fractions do not add to 1')
-        END IF
 
         !Calculate pressure in amagats
 
@@ -360,6 +385,10 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
                 'xe spin destruction rate',found)
             CALL FoundCheck(found, 'xe spin destruction rate', 'fatal')
 
+            IF (xe_spin_destruction_rate .lt. 0) THEN
+                CALL Fatal('OPUtil', 'Xe spin destruction rate is less than 0')
+            END IF
+
             SpinDestrucionRate= SpinDestrucionRate+&
                 xe_spin_destruction_rate*xe_numberdensity
 
@@ -373,6 +402,10 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
                 'he spin destruction rate',found)
             CALL FoundCheck(found, 'he spin destruction rate', 'fatal')
 
+            IF (he_spin_destruction_rate .lt. 0) THEN
+                CALL Fatal('OPUtil', 'He spin destruction rate is less than 0')
+            END IF
+
             SpinDestrucionRate = SpinDestrucionRate+&
                 he_spin_destruction_rate*he_numberdensity
         END IF
@@ -384,6 +417,10 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
             n2_spin_destruction_rate = GetConstReal(Materials,&
                 'n2 spin destruction rate',found)
             CALL FoundCheck(found, 'n2 spin destruction rate', 'fatal')
+
+            IF (n2_spin_destruction_rate .lt. 0) THEN
+                CALL Fatal('OPUtil', 'N2 spin destruction rate is less than 0')
+            END IF
 
             SpinDestrucionRate=SpinDestrucionRate+&
                 n2_spin_destruction_rate*n2_numberdensity
@@ -404,6 +441,11 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
         END IF
     END IF
 
+    IF (SpinDestrucionRate .lt. 0) THEN
+        CALL Fatal('CalculateSpinDestructionRate',&
+            'Calculated spin destruction rate is less than 0')
+    END IF
+
 END FUNCTION CalculateSpinDestructionRate
 
 FUNCTION CalculateRbPol(Model,n,argument) RESULT(RbPol)
@@ -419,18 +461,20 @@ FUNCTION CalculateRbPol(Model,n,argument) RESULT(RbPol)
 
     optrate=argument(1)
 
+    IF (optrate .lt. 0) THEN
+        CALL Fatal('CalculateRbPol',&
+            'optrate is less than 0. This is not physical.')
+    END IF
+
     sdargument= (/argument(2),argument(3),argument(4)/)
 
     spindestrucionrate=CalculateSpinDestructionRate(Model, n, sdargument)
 
     RbPol=optrate/(optrate+spindestrucionrate)
 
-    IF (RbPol>1) THEN
-        RbPol=1
-    END IF
-
-    IF (RbPol<0) THEN
-        RbPol=0
+    IF (RbPol .gt. 1 .or. RbPol .lt. 0) THEN
+        CALL Fatal('CalculateRbPol',&
+            'Calculated RbPol is not bound between 0 and 1')
     END IF
 
 END FUNCTION CalculateRbPol
@@ -457,13 +501,11 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     Constants=>GetConstants()
     Materials=>GetMaterial()
 
-    !Eventaully I might import more terms, so this is anticpating that eventuallity
     Concentration=Argument(1)
 
     Temperature=Argument(3)
 
-
-    IF (Temperature .EQ. 0.0D0) Call Fatal('GetSpinDestructionRate',&
+    IF (Temperature .EQ. 0.0D0) Call Fatal('CalculateSpinExchangeRate',&
         'Temperature variable not found.')
 
     Pressure=Argument(2)
@@ -476,13 +518,17 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
         Pressure=ref_pressure+Pressure
     END IF
 
-    IF (Pressure<0) THEN
-        Pressure = 0
-    END IF
+    CALL ArgumentCheck(Concentration, Pressure, Temperature,&
+        'CalculateSpinExchangeRate')
 
     !Binary component
     binaryexchangerate=GetConstReal(Materials, 'binary exchange rate', found)
     CALL FoundCheck(found, 'binaryexchangerate', 'fatal')
+
+
+    IF (binaryexchangerate .lt. 0) THEN
+        CALL Fatal('SESolver', 'Binary exchange rate is less than 0')
+    END IF
 
     SpinExchangeRate=binaryexchangerate*Concentration
 
@@ -499,13 +545,7 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     he_fraction = GetConstReal(Materials, 'he fraction', found)
     CALL FoundCheck(found, 'he fraction', 'fatal')
 
-
-    !Call fatal if the gas fractions don't add to 1
-
-    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-        CALL Fatal('GetSpinDestructionRate', &
-            'Gas fractions do not add to 1')
-    END IF
+    CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
     !Calculate pressure in amagats
 
@@ -516,8 +556,6 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     IF (.NOT. found) THEN
         loschmidt= 2.6867811D25
     END IF
-
-
 
     tot_numberdensity = ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
 
@@ -532,15 +570,31 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
     xemolcrate=GetConstReal(Materials, 'xe molecular se rate', found)
     CALL FoundCheck(found, 'xe molecular se rate', 'fatal')
 
+    IF (xemolcrate .lt. 0) THEN
+        CALL Fatal('OPUtil', 'Xe molecular se rate is less than 0')
+    END IF
+
     hemolcrate=GetConstReal(Materials, 'he molecular se rate', found)
     CALL FoundCheck(found, 'xe molecular se rate', 'fatal')
+
+    IF (hemolcrate .lt. 0) THEN
+        CALL Fatal('OPUtil', 'He molecular se rate is less than 0')
+    END IF
 
     n2molcrate=GetConstReal(Materials, 'n2 molecular se rate', found)
     CALL FoundCheck(found, 'xe molecular se rate', 'fatal')
 
+    IF (n2molcrate .lt. 0) THEN
+        CALL Fatal('OPUtil', 'N2 molecular se rate is less than 0')
+    END IF
 
     SpinExchangeRate=SpinExchangeRate+(1.0D0/(xe_numberdensity/xemolcrate&
         +he_numberdensity/hemolcrate+n2_numberdensity/n2molcrate))*Concentration
+
+    IF (SpinExchangeRate .lt. 0) THEN
+        CALL Fatal('CalculateSpinExchangeRate',&
+            'Calculated spin exchange rate is less than 0')
+    END IF
 
 END FUNCTION CalculateSpinExchangeRate
 
@@ -564,6 +618,7 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     Materials=>GetMaterial()
 
     Concentration=Argument(1)
+
     Pressure=Argument(2)
 
         !Get Reference Pressure
@@ -574,11 +629,10 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
         Pressure=ref_pressure+Pressure
     END IF
 
-    IF (Pressure<0) THEN
-        Pressure = 0
-    END IF
-
     Temperature=Argument(3)
+
+    CALL ArgumentCheck(Concentration, Pressure, Temperature,&
+        'CalculateSpinRelaxationRate')
 
     xe_fraction=GetConstReal(Materials, 'xe fraction', found)
     CALL FoundCheck(found, 'xe fraction', 'fatal')
@@ -589,12 +643,7 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     he_fraction = GetConstReal(Materials, 'he fraction', found)
     CALL FoundCheck(found, 'he fraction', 'fatal')
 
-        !Call fatal if the gas fractions don't add to 1
-
-    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-        CALL Fatal('GetSpinDestructionRate', &
-            'Gas fractions do not add to 1')
-    END IF
+    CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
     loschmidt=GetConstReal(Model % Constants, 'loschmidts constant', found)
     CALL FoundCheck(found, 'loschmidts constant' , 'warn')
@@ -605,20 +654,43 @@ FUNCTION CalculateSpinRelaxationRate(Model,n,Argument)&
     xe_binary=GetConstReal(Materials, 'binary spin relaxation', found)
     CALL FoundCheck(found, 'binary spin relaxation', 'fatal')
 
+    IF (xe_binary .lt. 0) THEN
+        CALL Fatal('OPUtil', 'Binary spin relaxation rate is less than 0')
+    END IF
+
     binary_term=xe_binary*xe_fraction*&
         ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
 
     xe_vdW_term=GetConstReal(Materials, 'xe van der Waal spin relaxation', found)
     CALL FoundCheck(found, 'xe van der Waal spin relaxation', 'fatal')
+
+    IF (xe_vdW_term .lt. 0) THEN
+        CALL Fatal('SESolver', 'vdW spin relaxation is less than 0')
+    END IF
+
+
     he_ratio_term=GetConstReal(Materials, 'spin relaxation he r', found)
     CALL FoundCheck(found, 'spin relaxation he r', 'fatal')
+    IF (he_ratio_term .lt. 0) THEN
+        CALL Fatal('SESolver', 'spin relaxation he r is less than 0')
+    END IF
+
     n2_ratio_term=GetConstReal(Materials, 'spin relaxation n2 r', found)
     CALL FoundCheck(found, 'spin relaxation n2 r', 'fatal')
+
+    IF (n2_ratio_term .lt. 0) THEN
+        CALL Fatal('SESolver', 'spin relaxation n2 r is less than 0')
+    END IF
 
     vdWterm=xe_vdW_term*(1.0D0/(1.0D0+he_ratio_term*he_fraction/xe_fraction+&
         n2_ratio_term*n2_fraction/xe_fraction))
 
     SpinRelaxationRate=binary_term+vdWterm
+
+    IF (SpinRelaxationRate .lt. 0) THEN
+        CALL Fatal('CalculateSpinRelaxationRate',&
+            'Calculated spin relaxation rate is less than 0')
+    END IF
 
 END FUNCTION CalculateSpinRelaxationRate
 
@@ -647,6 +719,7 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
 
     !Getting assignments
     Concentration=Argument(1)
+
     Pressure=Argument(2)
 
     !Get the refeerence pressure for Perfect Gas compressibility
@@ -663,17 +736,20 @@ FUNCTION CalculateXenonDiffusion(Model,n,Argument) RESULT(D_Xe)
         Pressure=ref_pressure+Pressure
     END IF
 
-    !Fix the pressure if it is wrong
-    IF (Pressure<0) THEN
-        Pressure = 0
-        CALL Warn('CalculateXenonDiffusion',&
-            'Pressure was less than 0, reset to 0.')
-    END IF
     !Get temperature assignment
     Temperature=Argument(3)
 
+    CALL ArgumentCheck(Concentration, Pressure, Temperature,&
+        'CalculateXenonDiffusion')
+
     D_Xe=CalculateDiffusion(Concentration, Pressure, Temperature,&
         massHe, massXe, sigmaHe, sigmaXe, KespHe, KespXe)
+
+    IF (D_Xe .lt. 0) THEN
+        CALL Fatal('CalculateXenonDiffusion',&
+            'Calculated Xenon Diffusion is less than 0')
+    END IF
+
 END FUNCTION CalculateXenonDiffusion
 
 FUNCTION CalculateRubidiumDiffusion(Model,n,Argument) RESULT(D_Rb)
@@ -701,6 +777,7 @@ FUNCTION CalculateRubidiumDiffusion(Model,n,Argument) RESULT(D_Rb)
 
     !Getting assignments
     Concentration=Argument(1)
+
     Pressure=Argument(2)
 
     !Get the refeerence pressure for Perfect Gas compressibility
@@ -717,14 +794,11 @@ FUNCTION CalculateRubidiumDiffusion(Model,n,Argument) RESULT(D_Rb)
         Pressure=ref_pressure+Pressure
     END IF
 
-    !Fix the pressure if it is wrong
-    IF (Pressure<0) THEN
-        Pressure = 0
-        CALL Warn('CalculateXenonDiffusion',&
-            'Pressure was less than 0, reset to 0.')
-    END IF
     !Get temperature assignment
     Temperature=Argument(3)
+
+    CALL ArgumentCheck(Concentration, Pressure, Temperature,&
+        'CalculateRubidiumDiffusion')
 
     D_Rb=CalculateDiffusion(Concentration, Pressure, Temperature,&
         massHe, massRb, sigmaHe, sigmaRb, KespHe, KespRb)
@@ -850,13 +924,7 @@ FUNCTION calculaterbfrequency(Model,n,pressure) RESULT(freqwidth)
     he_fraction = GetConstReal(Materials, 'he fraction', found)
     CALL FoundCheck(found, 'he fraction', 'fatal')
 
-
-        !Call fatal if the gas fractions don't add to 1
-
-    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-        CALL Fatal('GetSpinDestructionRate', &
-            'Gas fractions do not add to 1')
-    END IF
+    CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
     pressure = GetConstReal(Materials, 'frequency pressure', found)
     CALL FoundCheck(found, 'frequency pressure', 'fatal')
@@ -918,10 +986,20 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
 
     concentration=arguments(2)
 
+    IF (concentration .lt. 0) THEN
+        CALL Fatal('calculatelaserheating',&
+            'Concentration is less than 0')
+    END IF
+
     laser_frequency = speed_of_light/laser_wavelength
 
     heating=plank_constant*laser_frequency*concentration*spin_destruction_rate*&
         alkali_polarization
+
+    IF (heating .lt. 0) THEN
+        CALL Fatal('calculatelaserheating',&
+            'Calcualted laser heating is less than 0')
+    END IF
 
 !----------------------------------------------------------------------------------
 END FUNCTION calculatelaserheating
@@ -949,6 +1027,11 @@ FUNCTION calculateevaprate(Model,n,arguments)Result(evaprate)
     Constants=> GetConstants()
 
     temperature=arguments(3)
+
+    IF (temperature .lt. 0) THEN
+        CALL Fatal('calculate evaprate',&
+            'Temperature is less than 0')
+    END IF
 
     !Adjust to keep below boiling point of Rb.
 
@@ -998,7 +1081,10 @@ FUNCTION calculateevaprate(Model,n,arguments)Result(evaprate)
 
     evaprate=prefactor*evaprate
 
-
+    IF (evaprate .lt. 0) THEN
+        CALL Fatal('calculateevaprate',&
+            'Calculated evaporation rate is less than 0')
+    END IF
 
 !---------------------------------------------------------------------------------
 END FUNCTION calculateevaprate
@@ -1031,6 +1117,11 @@ FUNCTION calculateheattransfercoef(Model,n,arguments)RESULT(heatranscoef)
     CALL FoundCheck(found, 'glass thickness', 'fatal')
 
     heatranscoef = (1/airheattrans + glassthickness/glassthermalconst)**(-1)
+
+    IF (heatranscoef .lt. 0) THEN
+        CALL Fatal('calcualteheatransfercoef',&
+            'Calculated heat transfer coefficient is less than 0')
+    END IF
 
 END FUNCTION calculateheattransfercoef
 !--------------------------------------------------------------------------------
@@ -1072,12 +1163,7 @@ FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscositytot)
     he_fraction = GetConstReal(Materials, 'he fraction', found)
     CALL FoundCheck(found, 'he fraction', 'fatal')
 
-    !Call fatal if the gas fractions don't add to 1
-
-    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-        CALL Fatal('GetSpinDestructionRate', &
-            'Gas fractions do not add to 1')
-    END IF
+    CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
     !Make vector assignments in order: (1) He, (2) N2, (3) Xe
     frac = (/he_fraction,n2_fraction,xe_fraction/)
@@ -1120,6 +1206,10 @@ FUNCTION calculateviscosity(Model,n,arguments)RESULT(viscositytot)
 
     END DO
 
+    IF (viscositytot .lt. 0) THEN
+        CALL Fatal('calculateviscosity',&
+            'Calculated viscosity is less than 0')
+    END IF
 
 END FUNCTION calculateviscosity
 
@@ -1150,12 +1240,7 @@ FUNCTION calculateheatcapratio(Model,n,arguments)RESULT(heatcapratio)
     he_fraction = GetConstReal(Materials, 'he fraction', found)
     CALL FoundCheck(found, 'he fraction', 'fatal')
 
-    !Call fatal if the gas fractions don't add to 1
-
-    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-        CALL Fatal('GetSpinDestructionRate', &
-            'Gas fractions do not add to 1')
-    END IF
+    CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
     avgmolarmass = xe_fraction*131.293D0+n2_fraction*28.0134D0+he_fraction*4.002602D0
 
@@ -1165,6 +1250,11 @@ FUNCTION calculateheatcapratio(Model,n,arguments)RESULT(heatcapratio)
 
     heatcapratio=(5.0D0/2.0D0*(xemassfrac+hemassfrac)+7.0D0/2.0D0*n2massfrac)/&
         (3.0D0/2.0D0*(xemassfrac+hemassfrac)+5.0D0/2.0D0*n2massfrac)
+
+    IF (heatcapratio .lt. 0) THEN
+        CALL Fatal('calculateheatcapratio', &
+            'Calculated heat capacity ration is less than 0')
+    END IF
 
 END FUNCTION calculateheatcapratio
 
@@ -1196,12 +1286,7 @@ FUNCTION calculatecp(Model,n,arguments)RESULT(cp)
     he_fraction = GetConstReal(Materials, 'he fraction', found)
     CALL FoundCheck(found, 'he fraction', 'fatal')
 
-    !Call fatal if the gas fractions don't add to 1
-
-    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-        CALL Fatal('GetSpinDestructionRate', &
-            'Gas fractions do not add to 1')
-    END IF
+    CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
     avgmolarmass = xe_fraction*131.293D0+n2_fraction*28.0134D0+he_fraction*4.002602D0
 
@@ -1210,6 +1295,12 @@ FUNCTION calculatecp(Model,n,arguments)RESULT(cp)
     hemassfrac = he_fraction*4.0026202D0/avgmolarmass
 
     cp = xemassfrac*158.31D0+n2massfrac*1039.67D0+5196.118D0*hemassfrac
+
+    IF (cp .lt. 0) THEN
+        CALL Fatal('calculatecp',&
+            'Calculated cp is less than 0')
+    END IF
+
 END FUNCTION calculatecp
 
 FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
@@ -1239,6 +1330,11 @@ FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
 
     temperature = arguments(3)
 
+    IF (temperature .lt. 0) THEN
+        CALL Fatal('calculatethermalconductivity',&
+            'Calculated thermal ')
+    END IF
+
     Materials=>GetMaterial()
 
     xe_fraction=GetConstReal(Materials, 'xe fraction', found)
@@ -1250,12 +1346,7 @@ FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
     he_fraction = GetConstReal(Materials, 'he fraction', found)
     CALL FoundCheck(found, 'he fraction', 'fatal')
 
-    !Call fatal if the gas fractions don't add to 1
-
-    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-        CALL Fatal('GetSpinDestructionRate', &
-            'Gas fractions do not add to 1')
-    END IF
+    CALL GasFracCheck(xe_fraction, he_fraction, n2_fraction)
 
     !Make vector assignments in order: (1) He, (2) N2, (3) Xe
     frac = (/he_fraction,n2_fraction,xe_fraction/)
@@ -1298,6 +1389,10 @@ FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
 
     END DO
 
+    IF (ktot .lt. 0) THEN
+        CALL Fatal('calculatethermalconductivity', &
+            'Calculated thermal conductivity is less than 0')
+    END IF
 
 END FUNCTION calculatethermalconductivity
 
@@ -1340,6 +1435,54 @@ FUNCTION CalculateDiffusion(Concentration, Pressure, Temperature,&
     diffusioncoef = (A*Temperature**(3.0D0/2.0D0)*Mtot)/(pressure_atm*omega*sigma**2D0)
 
 END FUNCTION CalculateDiffusion
+
+SUBROUTINE ArgumentCheck(Concentration, Pressure, Temperature, Caller)
+    USE defutils
+
+    IMPLICIT NONE
+    REAL(KIND=dp), INTENT(IN) :: Concentration, Pressure, Temperature
+    CHARACTER(len=*), INTENT(IN) :: Caller
+    !-----------------------------------------------------------------
+    IF (Concentration .lt. 0 .or. Concentration .eq. 0) THEN
+        CALL Fatal(Caller, 'Concentration is less than 0')
+    END IF
+
+    IF (Pressure .lt. 0 .or. Pressure .eq. 0) THEN
+        CALL Fatal(Caller, 'Pressure is less than 0')
+    END IF
+
+    IF (Temperature .lt. 0 .or. Temperature .eq. 0) THEN
+        CALL Fatal(Caller, 'Temperature is less than 0')
+    END IF
+
+END SUBROUTINE ArgumentCheck
+
+SUBROUTINE GasFracCheck(xe_fraction, he_fraction, n2_fraction)
+    USE defutils
+
+    IMPLICIT NONE
+    REAL(Kind=dp), INTENT(IN) :: xe_fraction, he_fraction, n2_fraction
+    !---------------------------------------------------------------
+    IF (xe_fraction .lt. 0 .or. xe_fraction .gt. 1) THEN
+        CALL Fatal('OPUtil', 'Xenon fraction is not bound by 0 and 1')
+    END IF
+
+    IF (n2_fraction .lt. 0 .or. n2_fraction .gt. 1) THEN
+        CALL Fatal('OPUtil', 'N2 fraction is not bound by 0 and 1')
+    END IF
+
+    IF (he_fraction .lt. 0 .or. he_fraction .gt. 1) THEN
+        CALL Fatal('OPUtil', 'He fraction is not bound by 0 and 1')
+    END IF
+
+    !Call fatal if the gas fractions don't add to 1
+
+    IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
+        CALL Fatal('GetSpinDestructionRate', &
+            'Gas fractions do not add to 1')
+    END IF
+
+END SUBROUTINE GasFracCheck
 
 
 SUBROUTINE FoundCheck(found,name,warn_fatal_flag)

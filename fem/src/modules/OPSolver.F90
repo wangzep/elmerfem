@@ -73,6 +73,9 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
 
     CALL DefaultStart()
 
+    !Check to make sure that the typical OP variables in the SIF are within bounds
+    CALL ArgumentCheck()
+
     !Get the beta parameter. Done outside the loop to save on processing.
     !We just need it the first time.
 
@@ -197,6 +200,13 @@ CONTAINS
         !Get the previous solution
         CALL GetScalarLocalSolution(previous_solution, 'optrate', Element)
 
+        DO ind = 1, n
+            IF (previous_solution(ind) .LT. 0) THEN
+                CALL FATAL('OPSolver',&
+                    'optrate is less than 0, this is not physically possible')
+            END IF
+        END DO
+
         !Pointers to the SIF Constants and Material information
         Constants => GetConstants()
         Material => GetMaterial()
@@ -208,12 +218,19 @@ CONTAINS
         alkali_density(1:n)=GetReal(Material,'alkali density',found)
         CALL FoundCheck(found, 'alkali density', 'fatal')
 
-        convert_density=GetLogical(Material, 'Convert Density')
-        CALL FoundCheck(found, 'Convert Density', 'warn')
+        DO ind = 1, n
+            IF (alkali_density(ind) .LT. 0) THEN
+                CALL FATAL('OPSolver',&
+                    'alkali density is less than 0, this is not physically possible')
+            END IF
+        END DO
 
-        IF (convert_density) THEN
-            alkali_density = rb_density_conversion_factor*alkali_density
-        END IF
+        !        convert_density=GetLogical(Material, 'Convert Density')
+        !        CALL FoundCheck(found, 'Convert Density', 'warn')
+
+        !        IF (convert_density) THEN
+        !            alkali_density = rb_density_conversion_factor*alkali_density
+        !        END IF
 
 
 
@@ -222,9 +239,22 @@ CONTAINS
         spin_destruction_rate(1:n)=GetReal(Material,'spin destruction rate',found)
         CALL FoundCheck(found, 'spin destruction', 'fatal')
 
+        DO ind = 1, n
+            IF (spin_destruction_rate(ind) .LT. 0) THEN
+                CALL FATAL('OPSolver',&
+                    'spin destruction rate is less than 0, this is not physically possible')
+            END IF
+        END DO
 
         !beta
         beta(1:n)=betain
+
+        DO ind = 1, n
+            IF (beta(ind) .LT. 0) THEN
+                CALL FATAL('OPSolver',&
+                    'optrate is less than 0, this is not physically possible')
+            END IF
+        END DO
 
         !Direction of the laser beam
         laser_direction = 0._dp
@@ -268,6 +298,18 @@ CONTAINS
                 theta(1:n)=GetReal(Material, 'theta', found)
                 CALL FoundCheck(found, 'theta', 'fatal')
 
+                DO ind = 1, n
+                    IF (theta(ind) .LT. 0) THEN
+                        CALL FATAL('OPSolver',&
+                            'theta is less than 0, this is not physically possible')
+                    END IF
+                    !Check if theta is greater than pi/2
+                    IF (theta(ind) .GT. 1.57079632679) THEN
+                        CALL FATAL('OPSolver',&
+                            'theta is greater than pi/2, this is not physically possible')
+                    END IF
+                END DO
+
                 temp=spin_destruction_rate+previous_solution
                 temp=(previous_solution*(1-SIN(theta)**2))/temp
 
@@ -283,7 +325,7 @@ CONTAINS
                 IF (temp(ind) .LT. 1D-8) THEN
                     temp(ind)=1D-8
                     CALL WARN('OPSolver',&
-                     'Derivative of oprate is greater than 0, reset to 0')
+                        'Derivative of oprate is greater than 0, reset to 0')
                 END IF
             END DO
 
@@ -361,28 +403,51 @@ CONTAINS
 
         laser_wavelength = GetConstReal(Model%Constants,'laser wavelength',found)
         CALL FoundCheck(found, 'laser wavelength', 'fatal')
+        IF (laser_wavelength .LT. 0) THEN
+            CALL Fatal('CalcLasePowerBC',&
+                'laser wavelength is less than 0, that is not physically possible')
+        END IF
 
 
 
         dim = CoordinateSystemDimension()
 
-        plank_constant = GetConstReal(Model%Constants, 'Planks Constant',found1)
+        plank_constant = GetConstReal(Model%Constants, 'planks constant',found1)
+        IF (plank_constant .lt. 0) THEN
+            CALL Fatal('CalcLaserPowerBC',&
+                'planks constant is less than 0, that is not physically possible')
+        END IF
+
         speed_of_light = GetConstReal(Model%Constants,'speed of light',found2)
+        IF (speed_of_light .lt. 0) THEN
+            CALL Fatal('CalcLaserPowerBC',&
+                'speed of light is less than 0, that is not physically possible')
+        END IF
+
 
         IF (.NOT. (found1 .AND. found2)) THEN
 
             plank_constant = 6.62607004D-34
             speed_of_light = 299792458.0D0
 
-        !            CALL Warn('BetaCalc',&
-        !                'One or more of the constants are not listed in the SIF. Using default values SI units.')
+            CALL Warn('BetaCalc',&
+                'One or more of the constants are not listed in the SIF. Using default values SI units.')
         END IF
 
         area=GetConstReal(Model%Constants, 'Laser Spot Size', found)
         CALL FoundCheck(found, 'Laser Spot Size', 'fatal')
+        IF (area .lt. 0) THEN
+            CALL Fatal('CalcLaserPowerBC',&
+                'laser spot size is less than 0, that is not physically possible')
+        END IF
 
         laserpower=GetConstReal(BC, 'Laser Power', found)
         IF (.NOT. found) RETURN !If the BC isn't there for this element, we shouldn't set it
+        IF (laserpower .lt. 0) THEN
+            CALL Fatal('CalcLaserPowerBC',&
+                'Laser Power is less than 0, that is not physically possible')
+        END IF
+
 
         laser_frequency = speed_of_light/laser_wavelength
 
@@ -450,19 +515,62 @@ CONTAINS
         alkali_wavelength = GetConstReal(Constants,'alkali wavelength',found)
         CALL FoundCheck(found, 'alkali wavelength', 'fatal')
 
+        IF (alkali_wavelength .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'alakali wavelength is less that zero, this is not physically possible')
+        END IF
+
         laser_wavelength = GetConstReal(Constants,'laser wavelength',found)
         CALL FoundCheck(found, 'laser wavelength', 'fatal')
+
+        IF (laser_wavelength .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'laser wavelength is less that zero, this is not physically possible')
+        END IF
 
         laser_linewidth = GetConstReal(Constants,'laser line width',found)
         CALL FoundCheck(found, 'laser line width', 'fatal')
 
+        IF (laser_linewidth .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'laser linewidth is less that zero, this is not physically possible')
+        END IF
+
         alkali_freq_width = GetConstReal(Constants,'alkali frequency width',found)
         CALL FoundCheck(found, 'alkali frequency width', 'fatal')
 
+        IF (alkali_freq_width .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'alkali frequency width is less that zero, this is not physically possible')
+        END IF
+
         oscillator_strength = GetConstReal(Constants,'oscillator strength', found1)
+
+        IF (oscillator_strength .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'oscillator strength is less that zero, this is not physically possible')
+        END IF
+
         electron_radius = GetConstReal(Constants, 'electron radius', found2)
+
+        IF (electron_radius .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'electron radius is less that zero, this is not physically possible')
+        END IF
+
         plank_constant = GetConstReal(Constants, 'planks constant',found3)
+
+        IF (plank_constant .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'planks constant is less that zero, this is not physically possible')
+        END IF
+
         speed_of_light = GetConstReal(Constants,'speed of light',found4)
+
+        IF (speed_of_light .LT. 0) THEN
+            CALL Fatal('BetaCalc',&
+                'speed_of_light is less that zero, this is not physically possible')
+        END IF
 
         IF (.NOT. (found1 .AND. found2 .AND. found3 .AND. found4)) THEN
             oscillator_strength=1.0D0/3.0D0
@@ -513,13 +621,6 @@ CONTAINS
 
         beta = 2*DSQRT(RPi*LOG2)*(electron_radius*oscillator_strength*&
             laser_wavelength**2*w_prime)/laser_linewidth
-        !I added a cos term to assure that the laser optical pumping rate goes to zero at the boundaries
-        !of the laser beam area. I was getting some computational artifacts that appeared to be due to the
-        !discontinity at the border.
-        !The factor of 3.14/2 is to account for the difference in area under the curve of a cos and a Heaviside
-        !function.
-        !initopt = 3.14/2*beta*power/(area*plank_constant*laser_frequency)*COS((3.14**(3/2)*SQRT(x(1)**2 + x(2)**2))/(SQRT(area)))
-
 
         RETURN
     !------------------------------------------------------------------------------
@@ -798,237 +899,237 @@ CONTAINS
 END SUBROUTINE OPSolver
 !------------------------------------------------------------------------------
 
-FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
-    !-------------------------------------------------------------------------
-    !Calculates Rb number density in m^-3 using Killian equation as presented
-    !in Fink et al. 2005.
-    !n_Rb=10^(9.55-4132/T)/kT
-    !where T is the temperature in Kelvin and k is Boltzman's constant.
-    USE DefUtils
-    IMPLICIT None
-    TYPE(Model_t) :: model
-    INTEGER :: n
-    REAL(KIND=dp) :: Temp !Dummy Variable. Not actually used
-    REAL(KIND=dp) :: RbNumDensity_m, Temperature
-    LOGICAL :: found=.FALSE.
-    !------------------------------------------------------------------------
-    TYPE(ValueList_t), POINTER :: Materials
-    !-----------------------------------------------------------------------
-
-    Materials => GetConstants()
-
-    Temperature=GetConstReal(Materials, 'alkali temperature', found)
-    IF (.NOT. found) CALL Fatal('RbNumDensity',&
-        'Temperature not found')
-
-
-    RbNumDensity_m=(10**(9.55D0-4132.0D0/Temperature))/(1.380648521D-23*Temperature)
-
-
-END FUNCTION calculaterbmumdensitym
-
-FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
-    RESULT(SpinDestrucionRate)
-    USE DefUtils
-    IMPLICIT None
-    TYPE(Model_t) :: model
-    INTEGER :: n
-    REAL(KIND=dp) :: argument(3)
-    REAL(KIND=dp) :: Concentration, Temperature, Pressure, SpinDestrucionRate
-    !----------------------------------------------------------------------
-
-    REAL(KIND=dp) :: alkali_alkali_spin_destruction_rate, xe_spin_destruction_rate,&
-        he_spin_destruction_rate, n2_spin_destruction_rate, G1
-    REAL(KIND=dp) :: xe_fraction, n2_fraction, he_fraction, xe_numberdensity,&
-        he_numberdensity, n2_numberdensity,tot_numberdensity, ref_pressure
-    REAL(KIND=dp) :: loschmidt
-    !-----------------------------------------------------------------
-    INTEGER :: ind
-    !-----------------------------------------------------------------
-    LOGICAL :: convert_density=.FALSE., he_term_included=.FALSE.
-    LOGICAL :: n2_term_included=.FALSE., vanderWall_term_included=.FALSE.
-    LOGICAL :: xe_term_included=.FALSE., local_temperature_used = .FALSE.
-    LOGICAL :: local_pressure_used = .FALSE., found=.FALSE.
-    !--------------------------------------------------------
-    TYPE(ValueList_t), POINTER :: Materials, Constants
-    !--------------------------------------------------------------
-
-
-
-    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
-
-    SpinDestrucionRate = 0.0D0
-
-    Materials => GetMaterial()
-    Constants => GetConstants()
-
-    !!!!!!!!!!!!!!!!!!!Alkali-Alkali Spin Destruction Term!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    alkali_alkali_spin_destruction_rate=&
-        GetConstReal(Materials, 'alkali-alkali spin destruction rate', found)
-    CALL FoundCheck(found, 'alkali-alkali spin destruction rate','fatal')
-
-    ! Assign the Concentration
-    Concentration=argument(1)
-
-    !Check if we should convert the density (we probably do want to
-    convert_density=GetLogical(Materials, 'convert density', found)
-    CALL FoundCheck(found, 'convert density', 'warn')
-
-    !Convert the alkali density to particles/m^3
-    IF (convert_density) THEN
-        Concentration = rb_density_conversion_factor*Concentration
-    END IF
-
-    SpinDestrucionRate=alkali_alkali_spin_destruction_rate*Concentration
-
-    !Inclusion of other terms in the spin-destruction rate: He-Rb, N2-Rb,
-    !and Van der Walls terms
-
-    he_term_included=GetLogical(Materials,&
-        'Helium Spin Destruction Term Included',found)
-
-    n2_term_included = GetLogical(Materials,&
-        'Nitrogen Spin Destruction Term Included',found)
-
-    xe_term_included = GetLogical(Materials,&
-        'Xenon Spin Destruction Term Included',found)
-
-    vanderWall_term_included = GetLogical(Materials,&
-        'vander Wall Spin Destruction Term Included',found)
-
-    IF (he_term_included .OR. n2_term_included .OR. &
-        xe_term_included .OR. vanderWall_term_included) THEN
-
-        !Get the temperature
-
-        Temperature = argument(2)
-
-        IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
-            'Temperature variable not found.')
-
-
-        !Get the pressure
-
-        Pressure = argument(3)
-
-        !Check to make sure we actually found the solution
-
-
-        !        IF (Pressure .EQ. 0) Call Fatal('GetSpinDestructionRate',&
-        !            'Pressure variable not found. Check name of N-S variable.')
-
-
-        !Get the gas fractions
-        xe_fraction=GetConstReal(Materials, 'xe fraction', found)
-        CALL FoundCheck(found, 'xe fraction', 'fatal')
-
-        n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
-        CALL FoundCheck(found, 'n2 fraction' , 'fatal')
-
-        he_fraction = GetConstReal(Materials, 'he fraction', found)
-        CALL FoundCheck(found, 'he fraction', 'fatal')
-
-
-        !Call fatal if the gas fractions don't add to 1
-
-        IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
-            CALL Fatal('GetSpinDestructionRate', &
-                'Gas fractions do not add to 1')
-        END IF
-
-        !Calculate pressure in amagats
-
-        !Get Loschmidt's number if defined in constants
-
-        loschmidt=GetConstReal(Constants, 'loschmidts constant', found)
-        !CALL FoundCheck(found, 'loschmidts constant' , 'warn')
-        IF (.NOT. found) THEN
-            loschmidt= 2.6867811D25
-        END IF
-
-        tot_numberdensity = ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
-
-        xe_numberdensity=tot_numberdensity*xe_fraction
-
-        n2_numberdensity=tot_numberdensity*n2_fraction
-
-        he_numberdensity=tot_numberdensity*he_fraction
-
-        !Implement the xenon contribution to spin destruction rate
-        IF (xe_term_included) THEN
-
-            xe_spin_destruction_rate = 0.0D0
-            xe_spin_destruction_rate = GetConstReal(Materials,&
-                'xe spin destruction rate',found)
-            CALL FoundCheck(found, 'xe spin destruction rate', 'fatal')
-
-            SpinDestrucionRate= SpinDestrucionRate+&
-                xe_spin_destruction_rate*xe_numberdensity
-
-        END IF
-
-        !Implement helium contribution to spin destruction rate
-        IF (he_term_included) THEN
-
-            he_spin_destruction_rate = 0.0D0
-            he_spin_destruction_rate = GetConstReal(Materials,&
-                'he spin destruction rate',found)
-            CALL FoundCheck(found, 'he spin destruction rate', 'fatal')
-
-            SpinDestrucionRate = SpinDestrucionRate+&
-                he_spin_destruction_rate*he_numberdensity
-        END IF
-
-        !Implement N2 contribution to spin destruction rate
-        IF (n2_term_included) THEN
-
-            n2_spin_destruction_rate = 0.0D0
-            n2_spin_destruction_rate = GetConstReal(Materials,&
-                'n2 spin destruction rate',found)
-            CALL FoundCheck(found, 'n2 spin destruction rate', 'fatal')
-
-            SpinDestrucionRate=SpinDestrucionRate+&
-                n2_spin_destruction_rate*n2_numberdensity
-        END IF
-
-        !Implement van der Walls contribution to spin destruction rate
-        !See Nelson's 2001 thesis for details.
-        IF (vanderWall_term_included) THEN
-
-
-            G1 = 0.0D0
-            G1 = GetConstReal(Materials,'short-very short transition density',found)
-            CALL FoundCheck(found, 'short-very short transition density', 'fatal')
-
-            SpinDestrucionRate=SpinDestrucionRate+&
-                (0.385D0+0.642D0*1.0D0/(1.0D0+G1/tot_numberdensity))&
-                    *6469.0D0/(xe_fraction+1.1D0*n2_fraction+3.2D0*he_fraction)
-        END IF
-    END IF
-
-END FUNCTION CalculateSpinDestructionRate
-
-FUNCTION CalculateRbPol(Model,n,argument) RESULT(RbPol)
-    USE DefUtils
-    IMPLICIT None
-    TYPE(Model_t) :: Model
-    INTEGER :: n
-    REAL(KIND=dp) :: argument(4), sdargument(3)
-    REAL(KIND=dp) :: spindestrucionrate, optrate
-    REAL(KIND=dp) :: RbPol
-    REAL(KIND=dp) :: CalculateSpinDestructionRate
-    !--------------------------------------------------------------------------------
-
-    optrate=argument(1)
-
-    sdargument= (/argument(2),argument(3),argument(4)/)
-
-    spindestrucionrate=CalculateSpinDestructionRate(Model, n, sdargument)
-
-    RbPol=optrate/(optrate+spindestrucionrate)
-
-END FUNCTION CalculateRbPol
+!FUNCTION calculaterbmumdensitym(Model,n,Temp) RESULT(RbNumDensity_m)
+!    !-------------------------------------------------------------------------
+!    !Calculates Rb number density in m^-3 using Killian equation as presented
+!    !in Fink et al. 2005.
+!    !n_Rb=10^(9.55-4132/T)/kT
+!    !where T is the temperature in Kelvin and k is Boltzman's constant.
+!    USE DefUtils
+!    IMPLICIT None
+!    TYPE(Model_t) :: model
+!    INTEGER :: n
+!    REAL(KIND=dp) :: Temp !Dummy Variable. Not actually used
+!    REAL(KIND=dp) :: RbNumDensity_m, Temperature
+!    LOGICAL :: found=.FALSE.
+!    !------------------------------------------------------------------------
+!    TYPE(ValueList_t), POINTER :: Materials
+!    !-----------------------------------------------------------------------
+!
+!    Materials => GetConstants()
+!
+!    Temperature=GetConstReal(Materials, 'alkali temperature', found)
+!    IF (.NOT. found) CALL Fatal('RbNumDensity',&
+!        'Temperature not found')
+!
+!
+!    RbNumDensity_m=(10**(9.55D0-4132.0D0/Temperature))/(1.380648521D-23*Temperature)
+!
+!
+!END FUNCTION calculaterbmumdensitym
+
+!FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
+!    RESULT(SpinDestrucionRate)
+!    USE DefUtils
+!    IMPLICIT None
+!    TYPE(Model_t) :: model
+!    INTEGER :: n
+!    REAL(KIND=dp) :: argument(3)
+!    REAL(KIND=dp) :: Concentration, Temperature, Pressure, SpinDestrucionRate
+!    !----------------------------------------------------------------------
+!
+!    REAL(KIND=dp) :: alkali_alkali_spin_destruction_rate, xe_spin_destruction_rate,&
+!        he_spin_destruction_rate, n2_spin_destruction_rate, G1
+!    REAL(KIND=dp) :: xe_fraction, n2_fraction, he_fraction, xe_numberdensity,&
+!        he_numberdensity, n2_numberdensity,tot_numberdensity, ref_pressure
+!    REAL(KIND=dp) :: loschmidt
+!    !-----------------------------------------------------------------
+!    INTEGER :: ind
+!    !-----------------------------------------------------------------
+!    LOGICAL :: convert_density=.FALSE., he_term_included=.FALSE.
+!    LOGICAL :: n2_term_included=.FALSE., vanderWall_term_included=.FALSE.
+!    LOGICAL :: xe_term_included=.FALSE., local_temperature_used = .FALSE.
+!    LOGICAL :: local_pressure_used = .FALSE., found=.FALSE.
+!    !--------------------------------------------------------
+!    TYPE(ValueList_t), POINTER :: Materials, Constants
+!    !--------------------------------------------------------------
+!
+!
+!
+!    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
+!
+!    SpinDestrucionRate = 0.0D0
+!
+!    Materials => GetMaterial()
+!    Constants => GetConstants()
+!
+!    !!!!!!!!!!!!!!!!!!!Alkali-Alkali Spin Destruction Term!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
+!    alkali_alkali_spin_destruction_rate=&
+!        GetConstReal(Materials, 'alkali-alkali spin destruction rate', found)
+!    CALL FoundCheck(found, 'alkali-alkali spin destruction rate','fatal')
+!
+!    ! Assign the Concentration
+!    Concentration=argument(1)
+!
+!    !Check if we should convert the density (we probably do want to
+!    convert_density=GetLogical(Materials, 'convert density', found)
+!    CALL FoundCheck(found, 'convert density', 'warn')
+!
+!    !Convert the alkali density to particles/m^3
+!    IF (convert_density) THEN
+!        Concentration = rb_density_conversion_factor*Concentration
+!    END IF
+!
+!    SpinDestrucionRate=alkali_alkali_spin_destruction_rate*Concentration
+!
+!    !Inclusion of other terms in the spin-destruction rate: He-Rb, N2-Rb,
+!    !and Van der Walls terms
+!
+!    he_term_included=GetLogical(Materials,&
+!        'Helium Spin Destruction Term Included',found)
+!
+!    n2_term_included = GetLogical(Materials,&
+!        'Nitrogen Spin Destruction Term Included',found)
+!
+!    xe_term_included = GetLogical(Materials,&
+!        'Xenon Spin Destruction Term Included',found)
+!
+!    vanderWall_term_included = GetLogical(Materials,&
+!        'vander Wall Spin Destruction Term Included',found)
+!
+!    IF (he_term_included .OR. n2_term_included .OR. &
+!        xe_term_included .OR. vanderWall_term_included) THEN
+!
+!        !Get the temperature
+!
+!        Temperature = argument(2)
+!
+!        IF (Temperature .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+!            'Temperature variable not found.')
+!
+!
+!        !Get the pressure
+!
+!        Pressure = argument(3)
+!
+!        !Check to make sure we actually found the solution
+!
+!
+!        !        IF (Pressure .EQ. 0) Call Fatal('GetSpinDestructionRate',&
+!        !            'Pressure variable not found. Check name of N-S variable.')
+!
+!
+!        !Get the gas fractions
+!        xe_fraction=GetConstReal(Materials, 'xe fraction', found)
+!        CALL FoundCheck(found, 'xe fraction', 'fatal')
+!
+!        n2_fraction = GetConstReal(Materials, 'n2 fraction', found)
+!        CALL FoundCheck(found, 'n2 fraction' , 'fatal')
+!
+!        he_fraction = GetConstReal(Materials, 'he fraction', found)
+!        CALL FoundCheck(found, 'he fraction', 'fatal')
+!
+!
+!        !Call fatal if the gas fractions don't add to 1
+!
+!        IF (ABS(1-he_fraction-n2_fraction-xe_fraction)>1e-5) THEN
+!            CALL Fatal('GetSpinDestructionRate', &
+!                'Gas fractions do not add to 1')
+!        END IF
+!
+!        !Calculate pressure in amagats
+!
+!        !Get Loschmidt's number if defined in constants
+!
+!        loschmidt=GetConstReal(Constants, 'loschmidts constant', found)
+!        !CALL FoundCheck(found, 'loschmidts constant' , 'warn')
+!        IF (.NOT. found) THEN
+!            loschmidt= 2.6867811D25
+!        END IF
+!
+!        tot_numberdensity = ((Pressure)/101325.0D0)*(273.15D0/Temperature)*loschmidt
+!
+!        xe_numberdensity=tot_numberdensity*xe_fraction
+!
+!        n2_numberdensity=tot_numberdensity*n2_fraction
+!
+!        he_numberdensity=tot_numberdensity*he_fraction
+!
+!        !Implement the xenon contribution to spin destruction rate
+!        IF (xe_term_included) THEN
+!
+!            xe_spin_destruction_rate = 0.0D0
+!            xe_spin_destruction_rate = GetConstReal(Materials,&
+!                'xe spin destruction rate',found)
+!            CALL FoundCheck(found, 'xe spin destruction rate', 'fatal')
+!
+!            SpinDestrucionRate= SpinDestrucionRate+&
+!                xe_spin_destruction_rate*xe_numberdensity
+!
+!        END IF
+!
+!        !Implement helium contribution to spin destruction rate
+!        IF (he_term_included) THEN
+!
+!            he_spin_destruction_rate = 0.0D0
+!            he_spin_destruction_rate = GetConstReal(Materials,&
+!                'he spin destruction rate',found)
+!            CALL FoundCheck(found, 'he spin destruction rate', 'fatal')
+!
+!            SpinDestrucionRate = SpinDestrucionRate+&
+!                he_spin_destruction_rate*he_numberdensity
+!        END IF
+!
+!        !Implement N2 contribution to spin destruction rate
+!        IF (n2_term_included) THEN
+!
+!            n2_spin_destruction_rate = 0.0D0
+!            n2_spin_destruction_rate = GetConstReal(Materials,&
+!                'n2 spin destruction rate',found)
+!            CALL FoundCheck(found, 'n2 spin destruction rate', 'fatal')
+!
+!            SpinDestrucionRate=SpinDestrucionRate+&
+!                n2_spin_destruction_rate*n2_numberdensity
+!        END IF
+!
+!        !Implement van der Walls contribution to spin destruction rate
+!        !See Nelson's 2001 thesis for details.
+!        IF (vanderWall_term_included) THEN
+!
+!
+!            G1 = 0.0D0
+!            G1 = GetConstReal(Materials,'short-very short transition density',found)
+!            CALL FoundCheck(found, 'short-very short transition density', 'fatal')
+!
+!            SpinDestrucionRate=SpinDestrucionRate+&
+!                (0.385D0+0.642D0*1.0D0/(1.0D0+G1/tot_numberdensity))&
+!                *6469.0D0/(xe_fraction+1.1D0*n2_fraction+3.2D0*he_fraction)
+!        END IF
+!    END IF
+!
+!END FUNCTION CalculateSpinDestructionRate
+!
+!FUNCTION CalculateRbPol(Model,n,argument) RESULT(RbPol)
+!    USE DefUtils
+!    IMPLICIT None
+!    TYPE(Model_t) :: Model
+!    INTEGER :: n
+!    REAL(KIND=dp) :: argument(4), sdargument(3)
+!    REAL(KIND=dp) :: spindestrucionrate, optrate
+!    REAL(KIND=dp) :: RbPol
+!    REAL(KIND=dp) :: CalculateSpinDestructionRate
+!    !--------------------------------------------------------------------------------
+!
+!    optrate=argument(1)
+!
+!    sdargument= (/argument(2),argument(3),argument(4)/)
+!
+!    spindestrucionrate=CalculateSpinDestructionRate(Model, n, sdargument)
+!
+!    RbPol=optrate/(optrate+spindestrucionrate)
+!
+!END FUNCTION CalculateRbPol
 
 SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
     !------------------------------------------------------------------------------
@@ -1057,6 +1158,51 @@ SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
 !-------------------------------------------------------------------------
 END SUBROUTINE FoundCheck
 
+SUBROUTINE ArgumentCheck()
+
+    !Function that just checks that the SIF are positive
+    !Tried to just look at terms that are related to OPSolver
+    USE defutils
+
+    IMPLICIT NONE
+    REAL(KIND=dp) :: alkaliwavelength, alkalifreqwidth, laserwavelength,&
+        laserlinewidth, laserspotsize
+    TYPE(ValueList_t), POINTER :: Constants
+    LOGICAL :: found
+    !---------------------------------------------------------------
+
+    Constants => GetConstants()
+
+    alkaliwavelength = GetConstReal(Constants, 'alkali wavelength', found)
+    IF (found) THEN
+        IF (alkaliwavelength .lt. 0) THEN
+            CALL Fatal('OPUtil', 'Alakli wavelength is less than 0')
+        END IF
+    END IF
+
+    alkalifreqwidth = GetConstReal(Constants, 'alkali frequencey width', found)
+    IF (found) THEN
+        IF (alkalifreqwidth .lt. 0) THEN
+            CALL Fatal('OPUtil', 'Alakli wavelength is less than 0')
+        END IF
+    END IF
+
+    laserwavelength = GetConstReal(Constants, 'laser wavelength', found)
+    IF (found) THEN
+        IF (laserwavelength .lt. 0) THEN
+            CALL Fatal('OPUtil', 'Laser wave length is less than 0')
+        END IF
+    END IF
+
+    laserspotsize = GetConstReal(Constants, 'Laser Spot Size', found)
+    IF (found) THEN
+        IF (laserspotsize .lt. 0) THEN
+            CALL Fatal('OPUtil', 'Laser spot size is less than 0')
+        END IF
+    END IF
+
+
+END SUBROUTINE ArgumentCheck
 
 !--------------------------------------------------------------
 !From here down will need to moved to the eventual new XePol Solver

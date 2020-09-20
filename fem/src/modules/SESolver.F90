@@ -102,6 +102,8 @@ SUBROUTINE SESolver( Model,Solver,dt,TransientSimulation )
     !------------------------------------------------------------------------------
 
     CALL DefaultStart()
+    !Check all arguments related to SESolver in the SIF
+    CALL ArguementCheck()
 
     maxiter = ListGetInteger( GetSolverParams(),&
         'Nonlinear System Max Iterations',Found,minv=1)
@@ -175,7 +177,7 @@ CONTAINS
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd), LOAD(n)
         LOGICAL :: Stat,found
-        INTEGER :: i,t,p,q,dim
+        INTEGER :: ind, i,t,p,q,dim
         TYPE(GaussIntegrationPoints_t) :: IP
         TYPE(ValueList_t), POINTER :: BodyForce, Material
         TYPE(Nodes_t) :: Nodes
@@ -194,15 +196,42 @@ CONTAINS
         Material => GetMaterial()
         diff_coeff(1:n)=GetReal(Material,'xe diffusivity',Found)
 
+        DO ind = 1, n
+            IF (diff_coeff(ind) .LT. 0) THEN
+                CALL FATAL('SESolver',&
+                    'diffusion coefficient is less than 0, this is not physically possible')
+            END IF
+        END DO
+
         alkalipolarization(1:n)=GetReal(Material, 'alkali polarization', found)
         CALL FoundCheck(found, 'alkali polarization', 'fatal')
+
+        DO ind = 1, n
+            IF (alkalipolarization(ind) .LT. 0 .or. alkalipolarization(ind) .GT. 1) THEN
+                CALL FATAL('SESolver',&
+                    'alkali polarization is not bound by 0 and 1')
+            END IF
+        END DO
 
         spinrelaxationrate(1:n)=GetReal(Material, 'spin relaxation rate', found)
         CALL FoundCheck(found, 'spin relaxation rate', 'fatal')
 
+        DO ind = 1, n
+            IF (spinrelaxationrate(ind) .LT. 0) THEN
+                CALL FATAL('SESolver',&
+                    'spin relaxation rate is less than 0, this is not physically possible')
+            END IF
+        END DO
+
         spinexchangerate(1:n)=GetReal(Material, 'spin exchange rate', found)
         CALL FoundCheck(found, 'spin exchange rate', 'fatal')
 
+        DO ind = 1, n
+            IF (spinexchangerate(ind) .LT. 0) THEN
+                CALL FATAL('SESolver',&
+                    'spin exchange rate is less than 0, this is not physically possible')
+            END IF
+        END DO
 
         Load(1:n) = spinexchangerate*alkalipolarization
 
@@ -284,7 +313,7 @@ CONTAINS
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ,LoadAtIP
         REAL(KIND=dp) :: STIFF(nd,nd), FORCE(nd), LOAD(n)
         LOGICAL :: Stat,Found
-        INTEGER :: i,t,p,q,dim
+        INTEGER :: ind, i,t,p,q,dim
         TYPE(GaussIntegrationPoints_t) :: IP
 
         TYPE(ValueList_t), POINTER :: BC
@@ -302,13 +331,19 @@ CONTAINS
         FORCE = 0._dp
         LOAD = 0._dp
 
-
         Flux = 0.0d0
         Coeff(1:n) = 0.0d0
         Ext_t(1:n) = 0.0d0
 
         Coeff(1:n)  = GetReal( BC,'T1 Coefficient', Found )
         CALL FoundCheck(Found, 'T1 Coefficient', 'warn')
+
+        DO ind = 1, n
+            IF (Coeff(ind) .LT. 0) THEN
+                CALL FATAL('SESolver',&
+                    'T1 coefficient is less than 0, this is not physically possible')
+            END IF
+        END DO
 
         ! Numerical integration:
         !-----------------------
@@ -351,6 +386,49 @@ CONTAINS
 !------------------------------------------------------------------------------
 END SUBROUTINE SESolver
 !------------------------------------------------------------------------------
+SUBROUTINE ArguementCheck()
+    USE defutils
+    IMPLICIT NONE
+
+    REAL(KIND=dp) :: cellradius, T1, T1pressure, T1temperature, binaryexrate,&
+        xemolserate, n2molserate, hemolserate, binaryrelrate, xevdWrelrate, herelax,&
+        n2relax
+    TYPE(ValueList_t), POINTER :: Constants
+    LOGICAL :: found
+    !---------------------------------------------------------------
+
+    Constants => GetConstants()
+
+    cellradius = GetConstReal(Constants, 'cell radius', found)
+    IF (found) THEN
+        IF (cellradius .lt. 0) THEN
+            CALL Fatal('SESolver', 'Cell radius is less than 0')
+        END IF
+    END IF
+
+    T1 = GetConstReal(Constants, 'T1', found)
+    IF (found) THEN
+        IF (T1 .lt. 0) THEN
+            CALL Fatal('SESolver', 'T1 is less than 0')
+        END IF
+    END IF
+
+    T1pressure = GetConstReal(Constants, 'T1 pressure', found)
+    IF (found) THEN
+        IF (T1pressure .lt. 0) THEN
+            CALL Fatal('SESolver', 'T1 pressure is less than 0')
+        END IF
+    END IF
+
+    T1temperature = GetConstReal(Constants, 'T1 temperature', found)
+    IF (found) THEN
+        IF (T1temperature .lt. 0) THEN
+            CALL Fatal('SESolver', 'T1 temperature is less than 0')
+        END IF
+    END IF
+
+END SUBROUTINE ArguementCheck
+
 
 SUBROUTINE FoundCheck(found,name,warn_fatal_flag)
     !------------------------------------------------------------------------------
