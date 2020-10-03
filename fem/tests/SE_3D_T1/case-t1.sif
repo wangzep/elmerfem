@@ -1,0 +1,123 @@
+Check Keywords "Warn"
+
+Header :: Mesh DB "." "sphere"
+
+Constants
+  cell radius = Real .03
+  T1 = Real 500
+  T1 Pressure = Real 1e5
+  T1 Temperature = Real 300
+End
+
+Simulation
+  Max Output Level = 5
+  Coordinate System = Cartesian
+  Simulation Type = Transient
+  
+  Timestepping Method = BDF
+  BDF Order = 2
+  Timestep Intervals = 60
+  Timestep Sizes = 10  
+  Output Intervals(1) = 1
+
+!  Adaptive Timestepping = False
+!  Adaptive Time Error = 1e-2
+!  Adaptive Min Timestep = 1
+  
+  Steady State Max Iterations = 1
+  Post File   = "case.vtu"
+End
+
+Body 1
+  Equation = 1
+  Material = 1
+  Initial Condition = 1
+  Body Force = 1
+End
+
+
+Material 1
+  Convection Velocity 1 = 0
+  Convection Velocity 2 = 0
+  Convection Velocity 3 = 0
+
+  xe diffusivity = Variable Time, Pressure, Temperature; Real Procedure "OPUtil" "CalculateXenonDiffusion"
+
+  alkali polarization = Real 0
+  spin relaxation rate = Real 0
+  spin exchange rate = Real 0
+  
+  T1 Coefficient = Variable Time, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
+
+End
+
+Equation 1 :: Active Solvers(4) = 1 2 3 4
+
+Solver 1
+  Equation = "SESolver"
+  Variable = "XePol"
+  Procedure = "SESolver" "SESolver"
+  Element = "p:2"
+  Linear System Solver = Direct
+  Steady State Convergence Tolerance = 1e-9
+
+  !Adaptive Mesh Refinement = False
+  !Adaptive Remesh = False
+  !Adaptive Error Limit = 0.01
+  !Adaptive Save Mesh = False
+  !Adaptive Min H = 0.005
+  !Adaptive Max H = 0.02
+  !Adaptive Max Change = 0.005
+
+  Apply Limiter = True
+  !Exec Solver = Always
+  !Exec Condition = Variable Time; Real MATC "tx-20"
+End
+
+Solver 2
+  Equation = Heat Equation
+  Variable = Temperature
+  Steady State Convergence Tolerance = 3e-5
+  Exec Solver = Never
+End
+
+Solver 3
+  Equation = Navier-Stokes
+  Flow Model = Full
+  Procedure = "FlowSolve" "FlowSolver"
+  Variable = Flow Solution[Velocity:3 Pressure:1]
+  Exec Solver = Never
+End
+
+Solver 4
+  Exec Solver = Always
+  Procedure = File "SaveData" "SaveMaterials"
+  Parameter 1 = String xe diffusivity
+  Parameter 2 = String T1 Coefficient
+End
+
+Body Force 1
+  XePol Lower Limit = Real 0
+  XePol Upper Limit = Real 1
+End
+
+Boundary Condition 1
+  Target Boundaries(1) = 1
+  
+  Pressure = 1e5
+  Temperature = 300
+  T1 Coefficient = Variable Time, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
+  !XePol = 0
+  XePol Lower Limit = Real 0
+  XePol Upper Limit = Real 1 
+End
+
+Initial Condition 1
+  Pressure = 1e5
+  Temperature = 300
+  XePol = 1
+End
+
+!Solver 1 :: Reference Norm = Real 1.0578593
+!Solver 1 :: Reference Norm Tolerance = Real 1.0E-5
+!RUN

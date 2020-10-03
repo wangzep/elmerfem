@@ -1,0 +1,287 @@
+Check Keywords "Warn"
+
+Header :: Mesh DB "." "square"
+
+Constants
+  alkali wavelength = Real 794.7e-9
+  alkali frequency width = Real 14e9
+
+  laser wavelength = Real 794.7e-9
+  laser line width = Real 5.0e-10
+
+  Compute Beta = LOGICAL True
+
+  Compute Laser Power = LOGICAL True
+
+  Laser Spot Size = Real 0.00196349541
+
+  cell radius = Real .05
+  T1 = Real 1000
+  T1 Pressure = real 8e4
+  T1 Temperature = real 300
+End
+
+Simulation
+  Max Output Level = 5
+  Coordinate System = Cartesian 2D
+  Simulation Type = Steady
+  Output Intervals(1) = 1
+  Steady State Max Iterations = 10
+  Post File   = "case.vtu"
+End
+
+Body 1
+  Equation = 1
+  Material = 1
+  Body Force = 1
+  Initial Condition = 1
+End
+
+Equation 1
+  Active Solvers(6) = 1 2 3 4 5 6
+  Convection = None
+  Concentration Units = Absolute Mass  
+End
+
+Material 1
+  !OPSolver
+
+  laser direction 1 = Real 1
+  laser direction 2 = Real 0
+
+  Use Skew Light = LOGICAL True
+
+  theta = Real 0.05 
+
+  alkali density = Variable Concentration; Real MATC "tx" 
+
+  spin destruction rate = Real 9.4e4!Variable Concentration, Temperature, Pressure; Real Procedure "OPSolver" "CalculateSpinDestructionRate"
+ 
+  alkali-alkali spin destruction rate = Real 3.9e-20!Fink et al. 2005
+  xe spin destruction rate = Real 9.08e-21 !Nelson 2001
+  n2 spin destruction rate = Real 9e-24!Fink et al. 2005
+  he spin destruction rate = Real 2e-24!Fink et al. 2005
+  short-very short transition density = Real 7.2577554e-26 !Nelson 2001
+
+  alkali polarization = Real 0.9!Variable optrate, Concentration, Temperature, Pressure; Real Procedure "OPSolver" "CalculateRbPol"
+
+  !XePolSolver  
+  Convection Velocity 1 = Variable Velocity 1; MATC "tx"
+  Convection Velocity 2 = Variable Velocity 2; MATC "tx"
+
+  Helium Spin Destruction Term Included= LOGICAL True
+  Nitrogen Spin Destruction Term Included = LOGICAL True
+  Xenon Spin Destruction Term Included = LOGICAL True
+  vander Wall Spin Destruction Term Included = LOGICAL True
+
+  xe fraction = Real 0.25
+  n2 fraction = Real 0.25
+  he fraction = Real 0.5
+
+  
+  binary exchange rate = Real 3e-22
+  xe molecular se rate = Real 5230
+  n2 molecular se rate = Real 5700
+  he molecular se rate = Real 17000
+
+  binary spin relaxation = Real 1.9e-31 !Chann 2002
+  xe van der Waal spin relaxation = Real 6.72e-5 !Chann 2002
+  spin relaxation he r = Real 0.25 !Chann 2002
+  spin relaxation n2 r = Real 1.05 !Chann 2002
+  
+
+  spin exchange rate = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateSpinExchangeRate"
+  
+  spin relaxation rate = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateSpinRelaxationRate"
+
+  convert density = LOGICAL False!This should be taken out at some point.
+  
+  xe diffusivity = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateXenonDiffusion"
+
+  T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
+
+  !Advection
+  Concentration Diffusivity = Real 1.0e-5!This needs to be automated
+  Density = 1
+
+  !N-S
+  Compressibility Model = Perfect Gas
+  Reference Pressure = 0
+  Specific Heat Ratio = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculateheatcapratio"
+  Viscosity = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculateviscosity"
+  
+  !Heat
+  Heat Capacity = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculatecp"
+  Heat Conductivity = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculatethermalconductivity"
+
+  Heat Source = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculatelaserheating"
+
+End
+
+Solver 1
+  Equation = "OPSolver"
+  Variable = "optrate"
+  Procedure = "OPSolver" "OPSolver"
+  Element = "p:3"
+  Linear System Solver = Direct
+  Steady State Convergence Tolerance = 3e-5
+  Nonlinear System Max Iterations = 100
+  Nonlinear System Convergence Tolerance = 1e-6
+  Exec Solver = Always
+
+  Apply Limiter = True
+End
+
+Solver 2
+  Equation = "SESolver"
+  Variable = "XePol"
+  Procedure = "SESolver" "SESolver"
+  Element = "p:3"
+  Linear System Solver = Direct
+  Steady State Convergence Tolerance = 1e-9
+  Stabilize = True
+  Exec Solver = Always
+
+  Apply Limiter = True
+End
+
+Solver 3
+  Equation = Advection Diffusion
+  Variable = Concentration
+  Variable DOFs = 1
+  Procedure = "AdvectionDiffusion" "AdvectionDiffusionSolver"
+  !Linear System Solver = Iterative
+  !Linear System Iterative Method = BiCGStab
+  !Linear System Max Iterations = 200
+  !Linear System Convergence Tolerance = 1.0e-08
+  !Linear System Preconditioning = ILU1
+  !Linear System ILUT Tolerance = 1.0e-03
+  !Nonlinear System Max Iterations = 1
+  !Nonlinear System Convergence Tolerance = 1.0e-4
+  !Nonlinear System Newton After Tolerance = 1.0e-3
+  !Nonlinear System Newton After Iterations = 10
+  !Nonlinear System Relaxation Factor = 1
+  Steady State Convergence Tolerance = 1.0e-4
+  Linear System Solver = Direct
+  Steady State Convergence Tolerance = 1e-9
+
+  Stabilize = True
+
+  Exec Solver = Always
+End
+
+Solver 4
+  Equation = Heat Equation
+  Procedure = "HeatSolve" "HeatSolver"
+  Variable = Temperature
+  Exec Solver = Always
+  Stabilize = True
+  Bubbles = False
+  Lumped Mass Matrix = False
+  Optimize Bandwidth = True
+  Steady State Convergence Tolerance = 1.0e-5
+  Linear System Solver = Direct
+  Linear System Direct Method = Umfpack
+
+  Exec Solver = Always
+End
+
+Solver 5
+  Equation = Navier-Stokes
+  Equation = Navier-Stokes
+  Variable = Flow Solution[Velocity:2 Pressure:1]
+  Procedure = "FlowSolve" "FlowSolver"
+  Exec Solver = Always
+  Stabilize = False
+  Bubbles = True
+  Lumped Mass Matrix = False
+  Optimize Bandwidth = True
+  Steady State Convergence Tolerance = 1.0e-3
+  Nonlinear System Convergence Tolerance = 1.0e-2
+  Nonlinear System Max Iterations = 20
+  Nonlinear System Newton After Iterations = 100
+  Nonlinear System Newton After Tolerance = 1.0e-3
+  Nonlinear System Relaxation Factor = .9
+  Linear System Solver = Direct
+  Linear System Direct Method = Umfpack
+
+  Exec Solver = Always
+End
+
+Solver 6
+  Exec Solver = Always
+  Procedure = File "SaveData" "SaveMaterials"
+  Parameter 1 = String spin destruction rate
+  Parameter 2 = String xe diffusivity
+  Parameter 3 = String alkali polarization
+  Parameter 4 = String spin exchange rate
+  Parameter 5 = String spin relaxation rate
+  Parameter 6 = String T1 Coefficient
+  Parameter 7 = String Specific Heat Ratio
+  Parameter 8 = String Viscosity
+  Parameter 9 = String Heat Capacity
+  Parameter 10 = String Heat Conductivity
+  Parameter 11 = String Heat Source
+End
+
+Body Force 1
+  Heat Source = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculatelaserheating"
+  Flow Bodyforce 2 = -9.8
+End
+
+Initial Condition 1
+  Temperature = 300
+  Pressure = 1e5
+  Velocity 1 = -0.1
+  Velocity 2 = 0
+  Concentration = 1e19
+  XePol = Real 0
+  optrate = Real 0
+End
+
+Boundary Condition 1
+  Target Boundaries(1) = 1
+  T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
+  
+  Laser Power = Real 150
+  
+  External Pressure = -1e5
+  Velocity 2 = 0
+  
+  
+  air heat transfer coefficient = Real 40
+  glass thermal conductivity = Real 1.14
+  glass thickness = Real 0.02
+  Heat Transfer Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculateheattransfercoef"
+  External Temperature = 300
+ 
+End
+
+Boundary Condition 2
+  Target Boundaries(1) = 2
+  T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
+
+  Velocity 1 = -0.1
+  Velocity 2 = 0
+  Temperature = 300
+End
+
+Boundary Condition 3
+  Target Boundaries(2) = 3 4
+  
+  !Xe
+  T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
+
+  !Heat
+  Temperature = 373.15
+  
+  !A-D
+  alpha = Real 1
+  evap atomic mass = Real 1.41922608e-25! !in kg
+  Mass Transfer Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculateevaprate"
+  External Concentration = 1e19
+
+  !N-S
+  Noslip wall BC = True
+End
+

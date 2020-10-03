@@ -220,8 +220,9 @@ CONTAINS
 
         DO ind = 1, n
             IF (alkali_density(ind) .LT. 0) THEN
-                CALL FATAL('OPSolver',&
+                CALL WARN('OPSolver',&
                     'alkali density is less than 0, this is not physically possible')
+                    alkali_density(ind) = 0
             END IF
         END DO
 

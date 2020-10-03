@@ -164,6 +164,15 @@ MODULE OPUtil
             REAL(KIND=dp) :: ktot
         END
 
+        FUNCTION calculatedensity(Model,n,arguments)RESULT(density)
+            USE DefUtils
+            IMPLICIT NONE
+            TYPE(Model_t) :: Model
+            INTEGER :: n
+            REAL(KIND=dp) :: arguments(3)
+            REAL(KIND=dp) :: density
+        END
+
         FUNCTION CalculateDiffusion(Concentration, Pressure, Temperature,&
             mass1, mass2, sigma1,sigma2, Kesp1, Kesp2) RESULT(diffusioncoef)
             !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
@@ -178,8 +187,9 @@ MODULE OPUtil
             USE defutils
 
             IMPLICIT NONE
-            REAL(KIND=dp), INTENT(IN) :: Concentration, Pressure, Temperature
+            REAL(KIND=dp), INTENT(IN) :: Pressure, Temperature
             CHARACTER(len=*), INTENT(IN) :: Caller
+            REAL(KIND=dp) :: Concentration
         END
 
         SUBROUTINE GasFracCheck(xe_fraction, he_fraction, n2_fraction)
@@ -267,6 +277,31 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
     Materials => GetMaterial()
     Constants => GetConstants()
 
+    ! Assign the Concentration
+    Concentration=argument(1)
+
+
+    !Get the pressure
+
+    Pressure = argument(2)
+
+    !Get Reference Pressure
+
+    ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
+
+    IF (found) THEN
+        Pressure=ref_pressure+Pressure
+    END IF
+
+    !Get the temperature
+
+    Temperature = argument(3)
+
+
+    !Check the arguments are reasonable
+
+    CALL ArgumentCheck(Concentration, Pressure, Temperature,&
+        'CalculateSpinDestructionRate')
     !!!!!!!!!!!!!!!!!!!Alkali-Alkali Spin Destruction Term!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     alkali_alkali_spin_destruction_rate=&
@@ -276,14 +311,6 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
 
     IF (alkali_alkali_spin_destruction_rate .lt. 0) THEN
         CALL Fatal('OPUtil', 'Alkali-alkali spin destruction rate is less than 0')
-    END IF
-
-    ! Assign the Concentration
-    Concentration=argument(1)
-
-    IF (Concentration .lt. 0) THEN
-        CALL Fatal('CalculateSpinDestructionRate',&
-            'alkali concentration is less that 0, that is not physical.')
     END IF
 
     !    !Check if we should convert the density (we probably do want to
@@ -314,30 +341,6 @@ FUNCTION CalculateSpinDestructionRate(Model,n,argument)&
 
     IF (he_term_included .OR. n2_term_included .OR. &
         xe_term_included .OR. vanderWall_term_included) THEN
-
-        !Get the temperature
-
-        Temperature = argument(3)
-
-        IF (Temperature .lt. 0) Call Fatal('GetSpinDestructionRate',&
-            'Temperature is less than zero, that is not physical.')
-
-
-        !Get the pressure
-
-        Pressure = argument(2)
-
-        !Get Reference Pressure
-
-        ref_pressure=GetConstReal(Materials, 'Reference Pressure', found)
-
-        IF (found) THEN
-            Pressure=ref_pressure+Pressure
-        END IF
-
-
-        IF (Pressure .lt. 0) Call Fatal('GetSpinDestructionRate',&
-            'Pressure is less than zero, that is not physical.')
 
         !Check to make sure we actually found the solution
 
@@ -987,8 +990,9 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     concentration=arguments(2)
 
     IF (concentration .lt. 0) THEN
-        CALL Fatal('calculatelaserheating',&
+        CALL WARN('calculatelaserheating',&
             'Concentration is less than 0')
+            concentration = 0
     END IF
 
     laser_frequency = speed_of_light/laser_wavelength
@@ -1396,6 +1400,44 @@ FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
 
 END FUNCTION calculatethermalconductivity
 
+FUNCTION calculatedensity(Model,n,arguments)RESULT(density)
+    USE DefUtils
+    IMPLICIT NONE
+    TYPE(Model_t) :: Model
+    INTEGER :: n
+    REAL(KIND=dp) :: arguments(3)
+    REAL(KIND=dp) :: density
+    !----------------------------------------------------------
+    REAL(KIND=dp) :: RConst, Concentration, Pressure, Temperature
+    REAL(KIND=dp) :: specheatratio, cp, refpressure
+    REAL(KIND=dp) :: calculateheatcapratio, calculatecp
+    TYPE(ValueList_t), POINTER :: Materials
+    LOGICAL :: found
+    !-----------------------------------------------------------
+
+    Materials=> GetMaterial()
+
+    Concentration = arguments(1)
+    Pressure = arguments(2)
+    Temperature = arguments(3)
+
+    refpressure = GetConstReal(Materials, 'Reference Pressure', found)
+
+    IF (found) THEN
+        Pressure=Pressure+refpressure
+    END IF
+
+    CALL ArgumentCheck(Concentration, Pressure, Temperature, 'calculatedensity')
+
+    specheatratio = calculateheatcapratio(Model, n, arguments)
+    cp = calculatecp(Model, n, arguments)
+
+    RConst = ((specheatratio-1)/specheatratio)*cp
+    density = Pressure/(RConst*Temperature)
+
+END FUNCTION calculatedensity
+
+
 FUNCTION CalculateDiffusion(Concentration, Pressure, Temperature,&
     mass1, mass2, sigma1,sigma2, Kesp1, Kesp2) RESULT(diffusioncoef)
     !Implements terms from Bird, Stewart, and Lightfoot. Diffusion in m^2/s.
@@ -1440,11 +1482,13 @@ SUBROUTINE ArgumentCheck(Concentration, Pressure, Temperature, Caller)
     USE defutils
 
     IMPLICIT NONE
-    REAL(KIND=dp), INTENT(IN) :: Concentration, Pressure, Temperature
+    REAL(KIND=dp), INTENT(IN) :: Pressure, Temperature
     CHARACTER(len=*), INTENT(IN) :: Caller
+    REAL(KIND=dp) :: Concentration
     !-----------------------------------------------------------------
-    IF (Concentration .lt. 0 .or. Concentration .eq. 0) THEN
-        CALL Fatal(Caller, 'Concentration is less than 0')
+    IF (Concentration .lt. 0) THEN
+        CALL Warn(Caller, 'Concentration is less than 0')
+        Concentration = 0
     END IF
 
     IF (Pressure .lt. 0 .or. Pressure .eq. 0) THEN

@@ -1,0 +1,5 @@
+! ----- names for bodies -----
+$ body4 = 1
+! ----- names for boundaries -----
+$ Laser = 1
+$ Wall = 2

@@ -1,0 +1,64 @@
+Check Keywords "Warn"
+
+Header :: Mesh DB "." "sphere"
+
+Simulation
+  Max Output Level = 5
+  Coordinate System = Cartesian
+  Simulation Type = Transient
+
+  Timestepping Method = BDF
+  BDF Order = 2
+  Timestep Intervals = 60
+  Timestep Sizes = 10  
+  Output Intervals(1) = 1
+
+  Output Intervals(1) = 1
+  Steady State Max Iterations = 1
+  Post File   = "case.vtu"
+End
+!#print("this is lua")
+
+Body 1
+  Equation = 1
+  Material = 1
+  Body Force = 1
+  Initial Condition = 1
+End
+
+Material 1
+  Convection Velocity 1 = 0
+  Convection Velocity 2 = 0
+  Convection Velocity 3 = 0
+
+  diffusion coefficient = 1.0e-5
+  convection coefficient = 0
+  time derivative coefficient = 1.0
+End
+
+Body Force 1 :: Field Source = Real 0
+Equation 1 :: Active Solvers(1) = 1
+
+Solver 1
+  Equation = "ModelPDE"
+  Variable = "Field"
+  Procedure = "ModelPDE" "AdvDiffSolver"
+  Element = "p:2"
+  Linear System Solver = Direct
+  Steady State Convergence Tolerance = 1e-9
+End
+
+
+Boundary Condition 1
+  Target Boundaries(1) = 1
+  Robin Coefficient = 1e-4
+  External Field = 0
+End
+
+Initial Condition 1
+  Field = 1
+End
+
+Solver 1 :: Reference Norm = Real 1.0578593
+Solver 1 :: Reference Norm Tolerance = Real 1.0E-5
+RUN
