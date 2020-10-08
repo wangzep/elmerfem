@@ -990,8 +990,8 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     concentration=arguments(2)
 
     IF (concentration .lt. 0) THEN
-        CALL WARN('calculatelaserheating',&
-            'Concentration is less than 0')
+        CALL INFO('calculatelaserheating',&
+            'Concentration is less than 0', level = 6)
             concentration = 0
     END IF
 
@@ -1487,7 +1487,7 @@ SUBROUTINE ArgumentCheck(Concentration, Pressure, Temperature, Caller)
     REAL(KIND=dp) :: Concentration
     !-----------------------------------------------------------------
     IF (Concentration .lt. 0) THEN
-        CALL Warn(Caller, 'Concentration is less than 0')
+        !CALL INFO(Caller, 'Concentration is less than 0', level = 6)
         Concentration = 0
     END IF
 
