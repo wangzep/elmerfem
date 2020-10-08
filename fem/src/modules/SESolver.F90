@@ -336,7 +336,11 @@ CONTAINS
         Ext_t(1:n) = 0.0d0
 
         Coeff(1:n)  = GetReal( BC,'T1 Coefficient', Found )
-        CALL FoundCheck(Found, 'T1 Coefficient', 'warn')
+        !CALL FoundCheck(Found, 'T1 Coefficient', 'warn')
+
+        IF (.NOT. Found) THEN
+            CALL INFO(Caller, 'T1 Coefficient is not found', level = 15)
+        END
 
         DO ind = 1, n
             IF (Coeff(ind) .LT. 0) THEN
