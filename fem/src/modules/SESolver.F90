@@ -339,8 +339,8 @@ CONTAINS
         !CALL FoundCheck(Found, 'T1 Coefficient', 'warn')
 
         IF (.NOT. Found) THEN
-            CALL INFO(Caller, 'T1 Coefficient is not found', level = 15)
-        END
+            CALL INFO('SESolver', 'T1 Coefficient is not found', level = 15)
+        END IF
 
         DO ind = 1, n
             IF (Coeff(ind) .LT. 0) THEN
