@@ -44,7 +44,8 @@
 SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
     !------------------------------------------------------------------------------
     USE DefUtils
-    !USE OPUtil
+    !Use the element description model to try to construct a limit for non-linear term
+    USE elementdescription
 
     ! * Boiler-plate begining code for Elmer Solvers. See Elmer Solver manaul for details.
     IMPLICIT NONE
@@ -63,11 +64,12 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
     INTEGER :: n, nb, nd, t, active
     INTEGER :: iter, maxiter, newton_interations
     LOGICAL :: found, newton = .FALSE., beta_solve=.FALSE.,&
-        laser_power_use=.FALSE.
+        laser_power_use=.FALSE., limitrate=.FALSE.
+    TYPE(ValueList_t), POINTER :: SolverParams
     !------------------------------------------------------------------------------
 
     ! Factor to convert alkali density from kg/m^3 to part/m^3, I think this is only valid for rubidium
-    REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
+    !REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
 
     ! * Again, this is boiler plate code for Elmer Solvers
 
@@ -75,6 +77,10 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
 
     !Check to make sure that the typical OP variables in the SIF are within bounds
     CALL ArgumentCheck()
+
+    !Get information from the solver part of the sif and set the rate limiter flag
+
+    limitrate = GetLogical(Model% Solver % Values, 'Limit OP Rate', found)
 
     !Get the beta parameter. Done outside the loop to save on processing.
     !We just need it the first time.
@@ -114,11 +120,11 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
                     "Newton's Method has not yet been implemented in this solver. Continuing with Picard Interations.")
 
                 !Assemble the matrix
-                CALL LocalMatrix(Element, n, nd, beta)
+                CALL LocalMatrix(Element, n, nd, beta,limitrate)
             ELSE
 
                 ! Assemble the matrix
-                CALL LocalMatrix(  Element, n, nd+nb, beta)
+                CALL LocalMatrix(  Element, n, nd+nb, beta, limitrate)
             END IF
 
         END DO
@@ -160,7 +166,7 @@ CONTAINS
 
     ! Assembly of the matrix entries arising from the bulk elements
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrix( Element, n, nd, betain)
+    SUBROUTINE LocalMatrix( Element, n, nd, betain, limitrate)
         !------------------------------------------------------------------------------
         INTEGER :: n, nd
         TYPE(Element_t), POINTER :: Element
@@ -168,14 +174,14 @@ CONTAINS
         !------------------------------------------------------------------------------
         REAL(KIND=dp) ::  laser_direction(3,n),directionterm(3), Weight, nonlinearterm
         REAL(KIND=dp) :: alkali_density(n), spin_destruction_rate(n),  &
-            beta(n),previous_solution(n), temp(n), theta(n)
+            beta(n),previous_solution(n), temp(n), theta(n), elementdiam
 
         REAL(KIND=dp) :: Basis(nd),dBasisdx(nd,3),DetJ!,LoadAtIP
         REAL(KIND=dp) :: MASS(nd,nd), STIFF(nd,nd), FORCE(nd), LOAD(n)
 
         LOGICAL :: Stat,found
 
-        LOGICAL :: convert_density=.FALSE., skewlight=.FALSE.
+        LOGICAL :: convert_density=.FALSE., skewlight=.FALSE., limitrate
 
         INTEGER :: i,t,p,q,dim, ind
         TYPE(GaussIntegrationPoints_t) :: IP
@@ -183,7 +189,6 @@ CONTAINS
         TYPE(Nodes_t) :: Nodes
         SAVE Nodes
         !------------------------------------------------------------------------------
-
         dim = CoordinateSystemDimension()
 
         CALL GetElementNodes( Nodes )
@@ -202,8 +207,15 @@ CONTAINS
 
         DO ind = 1, n
             IF (previous_solution(ind) .LT. 0) THEN
-                CALL FATAL('OPSolver',&
-                    'optrate is less than 0, this is not physically possible')
+                previous_solution(ind) = 0
+
+                !If the rate is not limited then call fatal if the optrate drops
+                !below zero.
+
+                IF (.NOT. limitrate) THEN
+                    CALL FATAL('OPSolver',&
+                        'optrate is less than 0, this is not physically possible')
+                END IF
             END IF
         END DO
 
@@ -223,7 +235,7 @@ CONTAINS
                 CALL INFO('OPSolver',&
                     'alkali density is less than 0, this is not physically possible',&
                     level = 6)
-                    alkali_density(ind) = 0
+                alkali_density(ind) = 0
             END IF
         END DO
 
@@ -254,7 +266,7 @@ CONTAINS
         DO ind = 1, n
             IF (beta(ind) .LT. 0) THEN
                 CALL FATAL('OPSolver',&
-                    'optrate is less than 0, this is not physically possible')
+                    'beta is less than 0, this is not physically possible')
             END IF
         END DO
 
@@ -334,6 +346,27 @@ CONTAINS
             temp=alkali_density*temp
             temp=beta*temp
 
+            !If the rate is limited, check to see if temp*elementdiam < 1. This would be an indicator that the solution will be
+            !than zero and that temp is too big for the geometry. Essentially, this is a hack
+            !to account for rapidly changing optical pumping rates that change more quickly
+            !than our mesh size can account for, thus delivering really unrealistic solutions
+            !In and ideal world, we would apply mesh refinements, but Elmer doesn't support that
+            !really well.
+
+
+            IF (limitrate) THEN
+                elementdiam = ElementDiameter(Element,Nodes)
+                DO ind = 1, n
+                    IF (temp(ind)*elementdiam .GT. 1) THEN
+                        temp = 1/elementdiam
+                        CALL WARN('OPSolver',&
+                            'The nonlinear term exceeds estmiated possible value. Resetting value')
+                    END IF
+                END DO
+            END IF
+
+
+            !Construct the nonlinear term for the local matrix.
 
             nonlinearterm = SUM(Basis(1:n)*temp(1:n))
 

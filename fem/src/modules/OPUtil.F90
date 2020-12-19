@@ -465,8 +465,9 @@ FUNCTION CalculateRbPol(Model,n,argument) RESULT(RbPol)
     optrate=argument(1)
 
     IF (optrate .lt. 0) THEN
-        CALL Fatal('CalculateRbPol',&
-            'optrate is less than 0. This is not physical.')
+        optrate = 0
+        !CALL Fatal('CalculateRbPol',&
+         !   'optrate is less than 0. This is not physical.')
     END IF
 
     sdargument= (/argument(2),argument(3),argument(4)/)
@@ -497,7 +498,7 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
         tot_numberdensity, xe_numberdensity, n2_numberdensity, he_numberdensity,&
         ref_pressure
     TYPE(ValueList_t), POINTER :: Materials, Constants
-    LOGICAL :: found
+    LOGICAL :: found, is131 = .FALSE.
         !-----------------------------------------------------------
 
 
@@ -593,6 +594,12 @@ FUNCTION CalculateSpinExchangeRate(Model,n,Argument)&
 
     SpinExchangeRate=SpinExchangeRate+(1.0D0/(xe_numberdensity/xemolcrate&
         +he_numberdensity/hemolcrate+n2_numberdensity/n2molcrate))*Concentration
+
+        !Addition for 131Xe rate, just divide by 2.28
+    is131 = GetLogical(Materials, '131Xe', found)
+    IF (is131) THEN
+        SpinExchangeRate=SpinExchangeRate/2.28
+    END IF
 
     IF (SpinExchangeRate .lt. 0) THEN
         CALL Fatal('CalculateSpinExchangeRate',&
@@ -992,7 +999,7 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     IF (concentration .lt. 0) THEN
         CALL INFO('calculatelaserheating',&
             'Concentration is less than 0', level = 6)
-            concentration = 0
+        concentration = 0
     END IF
 
     laser_frequency = speed_of_light/laser_wavelength
@@ -1335,8 +1342,10 @@ FUNCTION calculatethermalconductivity(Model,n,arguments)RESULT(ktot)
     temperature = arguments(3)
 
     IF (temperature .lt. 0) THEN
-        CALL Fatal('calculatethermalconductivity',&
-            'Calculated thermal ')
+        CALL Warn('calculatethermalconductivity',&
+            'Temperature is less than 0')
+
+        temperature = 0
     END IF
 
     Materials=>GetMaterial()

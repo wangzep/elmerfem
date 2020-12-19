@@ -2,6 +2,8 @@ Check Keywords "Warn"
 
 Header :: Mesh DB "." "square"
 
+$temp = 440
+
 Constants
   loschmidts constant = Real 2.6867811e25
   planks constant = Real 6.62607004e-34
@@ -32,7 +34,7 @@ Simulation
   Max Output Level = 10
   Coordinate System = Cartesian 2D
   
-  Simulation Type = Transient
+  Simulation Type = Steady State!Transient
   Timestepping Method = BDF
   BDF Order = 1
   Timestep Intervals = 50
@@ -115,8 +117,8 @@ Material 1
   T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
 
   !Advection
-  Concentration Diffusivity = Real 1.0e-5!This needs to be automated
-  Density = 1.205
+  Concentration Diffusivity = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateRubidiumDiffusion"
+   Density = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculatedensity"
 
   !N-S
   Compressibility Model = Perfect Gas
@@ -155,14 +157,14 @@ Solver 2
   Procedure = "OPSolver" "OPSolver"
   Element = "p:3"
 
-  Linear System Solver = Iterative
+  !Linear System Solver = Iterative
   Linear System Iterative Method = GMRES
   Linear System GMRES Restart = 10
   Linear System Preconditioning = ILU1
   Linear System Convergence Tolerance = 1e-5
   Linear System Max Iterations = 50  
 
-  !Linear System Solver = Direct
+  Linear System Solver = Direct
   Steady State Convergence Tolerance = 3e-5
   Nonlinear System Max Iterations = 100
   Nonlinear System Convergence Tolerance = 1e-4
@@ -262,7 +264,7 @@ End
 
 Body Force 1
   Heat Source = Variable optrate, Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculatelaserheating"
-  Flow Bodyforce 1 = 9.8
+  Flow Bodyforce 2 = -9.8
 
   Temperature Lower Limit = 273.15
 
@@ -276,9 +278,9 @@ Body Force 1
 End
 
 Initial Condition 1
-  Temperature = 410
+  Temperature = $temp
   Pressure = 1
-  Velocity 1 = -.005
+  Velocity 1 = -.01
   Velocity 2 = 0
   Concentration = 1e18
   XePol = Real 0
@@ -287,42 +289,53 @@ End
 
 Boundary Condition 1
   Target Boundaries(1) = 1
+  
+  Laser Power = Real 75
+  
+
+  
+  !Xe
   T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
 
-  Concentration = 1e18
-  
-  Laser Power = Real 15
-  
-  Velocity 2 = 0
-  Velocity 1 Upper Limit = Real -1e-3
-  
-  
- !Temperature = 300
+  !Heat
+  air heat transfer coefficient = Real 410
+  glass thermal conductivity = Real 1.14
+  glass thickness = Real 0.02
+  Heat Transfer Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculateheattransfercoef"
+  External Temperature = $temp
+
+  !A-D
+
+
+  !N-S
  
+  Velocity 2 = 0
+  Velocity 1 Upper Limit = Real 0
+
 End
 
 Boundary Condition 2
   Target Boundaries(1) = 2
   T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
 
-  Velocity 1 = -.005
+  Velocity 1 = -.01
   Velocity 2 = 0
   XePol=0
-  Temperature = 300
+  Temperature = 400
 End
 
-Boundary Condition 3
+Boundary Condition 2
   Target Boundaries(2) = 3 4
   
   !Xe
   T1 Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "CalculateDecayRate"
 
   !Heat
-  air heat transfer coefficient = Real 400
+  air heat transfer coefficient = Real 410
   glass thermal conductivity = Real 1.14
   glass thickness = Real 0.02
   Heat Transfer Coefficient = Variable Concentration, Pressure, Temperature; Real Procedure "OPUtil" "calculateheattransfercoef"
-  External Temperature = 400
+  External Temperature = $temp
 
   !A-D
   alpha = Real 1
