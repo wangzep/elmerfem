@@ -956,9 +956,9 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     TYPE(ValueList_t), POINTER :: Materials, Constants
     REAL(KIND=dp) :: laser_wavelength, speed_of_light, plank_constant,&
         concentration, spin_destruction_rate, alkali_polarization,&
-        laser_frequency
+        laser_frequency, heatlimit
     REAL(KIND=dp) :: CalculateSpinDestructionRate, CalculateRbPol
-    LOGICAL :: found, found1, found2
+    LOGICAL :: found, found1, found2, limitheat = .FALSE.
 
     sdargument= (/arguments(2),arguments(3),arguments(4)/)
 
@@ -1010,6 +1010,20 @@ FUNCTION calculatelaserheating(Model,n,arguments)RESULT(heating)
     IF (heating .lt. 0) THEN
         CALL Fatal('calculatelaserheating',&
             'Calcualted laser heating is less than 0')
+    END IF
+
+    !Code to limit the amount of heat. This might be necessary if the heating is greater
+    !than what can be supported by the mesh size.
+
+    limitheat = GetLogical(Materials, 'Limit Heat', found)
+    CALL FoundCheck(found, 'Limit Heat', 'warn')
+
+    heatlimit = GetConstReal(Materials, 'Heat Limit', found)
+
+    IF (limitheat) THEN
+        IF (heating .gt. heatlimit) THEN
+            heating = heatlimit
+        END IF
     END IF
 
 !----------------------------------------------------------------------------------
@@ -1271,7 +1285,8 @@ END FUNCTION calculateheatcapratio
 
 
 FUNCTION calculatecp(Model,n,arguments)RESULT(cp)
-    !Define heat capacity at constant pressure a function of gas fraction, He = 5196.118 N2 = 1039.67 Xe = 158.31 J/kg*K, from NIST Chemistry Webbook
+    !Define heat capacity at constant pressure a function of gas fraction,
+    !He = 5196.118 J/kg*K N2 = 1039.67 J/kg*K Xe = 158.31 J/kg*K, from NIST Chemistry Webbook
     !Need to use mass fraction instead of mole or volume fraction.
     USE DefUtils
     IMPLICIT NONE

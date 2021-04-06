@@ -64,10 +64,28 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
     INTEGER :: n, nb, nd, t, active
     INTEGER :: iter, maxiter, newton_interations
     LOGICAL :: found, newton = .FALSE., beta_solve=.FALSE.,&
-        laser_power_use=.FALSE., limitrate=.FALSE.
+        laser_power_use=.FALSE.
     TYPE(ValueList_t), POINTER :: SolverParams
     !------------------------------------------------------------------------------
+    !Create a Flag structure that is somewhat easier to pass to LocalMatrix.
+    !This will have all the flags for turning stuff on or off that can't be
+    !contained in the matrix loop for various reasons.
 
+    TYPE flags
+        LOGICAL limitrate
+        LOGICAL limitratewarning
+        LOGICAL limitalkalidensitywarning
+    END TYPE Flags
+
+    !Define initial value in Flags, should all be false:
+    TYPE(flags) :: modflags
+
+    modflags % limitrate = .FALSE.
+    modflags % limitratewarning = .FALSE.
+    modflags % limitalkalidensitywarning = .FALSE.
+
+
+    !------------------------------------------------------------------------------
     ! Factor to convert alkali density from kg/m^3 to part/m^3, I think this is only valid for rubidium
     !REAL, PARAMETER :: rb_density_conversion_factor = 7.043279D24
 
@@ -80,7 +98,7 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
 
     !Get information from the solver part of the sif and set the rate limiter flag
 
-    limitrate = GetLogical(Model% Solver % Values, 'Limit OP Rate', found)
+    modflags % limitrate = GetLogical(Model% Solver % Values, 'Limit OP Rate', found)
 
     !Get the beta parameter. Done outside the loop to save on processing.
     !We just need it the first time.
@@ -120,11 +138,11 @@ SUBROUTINE OPSolver( Model,Solver,dt,TransientSimulation )
                     "Newton's Method has not yet been implemented in this solver. Continuing with Picard Interations.")
 
                 !Assemble the matrix
-                CALL LocalMatrix(Element, n, nd, beta,limitrate)
+                CALL LocalMatrix(Element, n, nd, beta, modflags)
             ELSE
 
                 ! Assemble the matrix
-                CALL LocalMatrix(  Element, n, nd+nb, beta, limitrate)
+                CALL LocalMatrix(  Element, n, nd+nb, beta, modflags)
             END IF
 
         END DO
@@ -166,7 +184,7 @@ CONTAINS
 
     ! Assembly of the matrix entries arising from the bulk elements
     !------------------------------------------------------------------------------
-    SUBROUTINE LocalMatrix( Element, n, nd, betain, limitrate)
+    SUBROUTINE LocalMatrix( Element, n, nd, betain, modflags)
         !------------------------------------------------------------------------------
         INTEGER :: n, nd
         TYPE(Element_t), POINTER :: Element
@@ -181,12 +199,13 @@ CONTAINS
 
         LOGICAL :: Stat,found
 
-        LOGICAL :: convert_density=.FALSE., skewlight=.FALSE., limitrate
+        LOGICAL :: convert_density=.FALSE., skewlight=.FALSE.
 
         INTEGER :: i,t,p,q,dim, ind
         TYPE(GaussIntegrationPoints_t) :: IP
         TYPE(ValueList_t), POINTER :: BodyForce, Material, Constants
         TYPE(Nodes_t) :: Nodes
+        TYPE(flags) :: modflags
         SAVE Nodes
         !------------------------------------------------------------------------------
         dim = CoordinateSystemDimension()
@@ -212,7 +231,7 @@ CONTAINS
                 !If the rate is not limited then call fatal if the optrate drops
                 !below zero.
 
-                IF (.NOT. limitrate) THEN
+                IF (.NOT. modflags % limitrate) THEN
                     CALL FATAL('OPSolver',&
                         'optrate is less than 0, this is not physically possible')
                 END IF
@@ -230,13 +249,24 @@ CONTAINS
         alkali_density(1:n)=GetReal(Material,'alkali density',found)
         CALL FoundCheck(found, 'alkali density', 'fatal')
 
+        !Check and correct the alaklidensity if needed
         DO ind = 1, n
             IF (alkali_density(ind) .LT. 0) THEN
-                CALL INFO('OPSolver',&
-                    'alkali density is less than 0, this is not physically possible',&
-                    level = 6)
+
                 alkali_density(ind) = 0
+                !Show a warning, but only the first time it is thrown
+                IF (.NOT. modflags % limitalkalidensitywarning) THEN
+
+                    CALL WARN('OPSolver',&
+                        'alkali density is less than 0, this is not physically possible')
+                    !Change the value of the flag so that the warning is not thrown
+                    !the next time through.
+                    modflags % limitalkalidensitywarning = .TRUE.
+
+                END IF
+
             END IF
+
         END DO
 
         !        convert_density=GetLogical(Material, 'Convert Density')
@@ -354,13 +384,20 @@ CONTAINS
             !really well.
 
 
-            IF (limitrate) THEN
+            IF (modflags % limitrate) THEN
                 elementdiam = ElementDiameter(Element,Nodes)
                 DO ind = 1, n
                     IF (temp(ind)*elementdiam .GT. 1) THEN
                         temp = 1/elementdiam
-                        CALL WARN('OPSolver',&
-                            'The nonlinear term exceeds estmiated possible value. Resetting value')
+
+                        !Show warning, but only the first time it is thrown
+                        IF (.NOT. modflags % limitratewarning) THEN
+                            CALL WARN('OPSolver',&
+                                'The nonlinear term exceeds estmiated possible value. Resetting value')
+                            !Change flag so that the warning is not shown the next time through
+                            modflags % limitratewarning = .TRUE.
+                        END IF
+
                     END IF
                 END DO
             END IF
